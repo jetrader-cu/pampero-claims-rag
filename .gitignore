@@ -20,7 +20,8 @@ coverage/
 !.env.example
 
 # Datos locales
-data/uploads/
+data/
+**/data/
 *.log
 
 # Editor / SO

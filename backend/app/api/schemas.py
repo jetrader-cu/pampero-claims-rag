@@ -67,6 +67,53 @@ class MeResponse(BaseModel):
     tenant: TenantOut
 
 
+class UploadAccepted(BaseModel):
+    """Respuesta al subir un documento o solicitar su reprocesamiento."""
+
+    document_id: uuid.UUID
+    job_id: uuid.UUID | None = None
+    status: str
+    duplicate: bool = False
+
+
+class DocumentOut(BaseModel):
+    """Esquema de salida para un documento registrado."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    filename: str
+    size_bytes: int
+    page_count: int | None = None
+    status: str
+    stage: str | None = None
+    chunk_count: int = 0
+    ocr_used: bool = False
+    error_code: str | None = None
+    error_detail: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobOut(BaseModel):
+    """Esquema de salida con el estado de un trabajo de ingesta asíncrona."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    document_id: uuid.UUID
+    status: str
+    attempt: int
+    max_attempts: int
+    error_code: str | None = None
+    error_detail: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
 class ProblemDetails(BaseModel):
     """Estructura estándar de error RFC 7807 (application/problem+json)."""
 

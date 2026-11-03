@@ -1,7 +1,7 @@
 """Modelos relacionales de SQLAlchemy para Pampero Claims Assistant."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
@@ -136,7 +136,7 @@ class Document(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         server_default=sa_text("now()"),
-        onupdate=datetime.utcnow,
+        onupdate=lambda: datetime.now(UTC).replace(tzinfo=None),
         nullable=False,
     )
 

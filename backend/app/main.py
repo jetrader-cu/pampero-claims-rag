@@ -14,7 +14,7 @@ from app.api.errors import (
     problem_exception_handler,
     validation_exception_handler,
 )
-from app.api.routes import admin, health, me
+from app.api.routes import admin, documents, health, jobs, me
 from app.settings import get_settings
 
 
@@ -63,10 +63,12 @@ def create_app() -> FastAPI:
     # Rutas de comprobación de salud en raíz
     app.include_router(health.router)
 
-    # Rutas bajo prefijo /api/v1
+    # Rutas bajo prefijo /api/v1 y convenientes
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(admin.router, prefix="/api/v1")
     app.include_router(me.router, prefix="/api/v1")
+    app.include_router(documents.router, prefix="/api/v1")
+    app.include_router(jobs.router, prefix="/api/v1")
 
     return app
 
