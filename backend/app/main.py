@@ -14,7 +14,7 @@ from app.api.errors import (
     problem_exception_handler,
     validation_exception_handler,
 )
-from app.api.routes import admin, documents, health, jobs, me
+from app.api.routes import admin, chunks, documents, health, jobs, me, questions
 from app.settings import get_settings
 
 
@@ -69,6 +69,8 @@ def create_app() -> FastAPI:
     app.include_router(me.router, prefix="/api/v1")
     app.include_router(documents.router, prefix="/api/v1")
     app.include_router(jobs.router, prefix="/api/v1")
+    app.include_router(chunks.router, prefix="/api/v1")
+    app.include_router(questions.router, prefix="/api/v1")
 
     return app
 
