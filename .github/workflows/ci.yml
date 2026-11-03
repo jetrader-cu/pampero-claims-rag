@@ -1,0 +1,125 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (Python 3.12, lint, tipos, tests, auditoría)
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:0.8.7-pg17-trixie
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pampero
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pampero"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8.8.4
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL_OWNER: postgresql+psycopg://postgres:postgres@localhost:5432/pampero
+      DATABASE_URL: postgresql+asyncpg://pampero_app:pampero_app_secret@localhost:5432/pampero
+      DATABASE_SYNC_URL: postgresql+psycopg://pampero_app:pampero_app_secret@localhost:5432/pampero
+      LLM_PROVIDER: fake
+      EMBEDDING_PROVIDER: fake
+      PARSER: pypdf
+    steps:
+      - name: Descargar código fuente
+        uses: actions/checkout@v4
+
+      - name: Configurar uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Instalar dependencias
+        run: uv sync --frozen
+
+      - name: Lint y formato con ruff
+        run: uv run ruff check . && uv run ruff format --check .
+
+      - name: Comprobación estricta de tipos con mypy
+        run: uv run mypy app
+
+      - name: Migraciones de base de datos (si aplica)
+        run: |
+          if [ -f "alembic.ini" ]; then
+            uv run alembic upgrade head
+          fi
+
+      - name: Pruebas unitarias y de integración
+        run: uv run pytest -m "not docling"
+
+      - name: Evaluación de RAG (si aplica)
+        run: |
+          if [ -f "../scripts/eval.py" ]; then
+            uv run python ../scripts/eval.py --inprocess --assert
+          fi
+
+      - name: Auditoría de vulnerabilidades con pip-audit
+        run: uv run pip-audit
+
+  frontend:
+    name: Frontend (Node 22, lint, tipos, vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Descargar código fuente
+        uses: actions/checkout@v4
+
+      - name: Configurar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Configurar Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint con ESLint
+        run: pnpm lint
+
+      - name: Verificación de tipos con TypeScript
+        run: pnpm typecheck
+
+      - name: Pruebas con Vitest
+        run: pnpm test
+
+  secrets:
+    name: Escaneo de secretos (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio completo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detección de credenciales y secretos con Gitleaks
+        uses: gitleaks/gitleaks-action@v2
