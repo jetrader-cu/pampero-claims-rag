@@ -69,7 +69,9 @@ select = [
     "SIM",    # flake8-simplify
     "ASYNC",  # flake8-async
 ]
-ignore = []
+ignore = [
+    "B008",   # FastAPI requiere Depends/Security en defaults de funciones
+]
 
 [tool.mypy]
 python_version = "3.12"
