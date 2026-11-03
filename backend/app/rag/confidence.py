@@ -13,7 +13,8 @@ def decide_confidence(
     hits: Sequence[RetrievalHit],
     valid_citations: list[Citation],
     dropped_citations: list[LLMCitation],
-    min_sim: float = 0.30,
+    min_sim: float = 0.20,
+    high_sim: float = 0.50,
 ) -> ConfidenceLevel:
     """Calcula el nivel de confianza basado en similitud, citas válidas y citas descartadas."""
     if not valid_citations:
@@ -26,12 +27,16 @@ def decide_confidence(
     max_sim = max((h.sim for h in hits), default=0.0)
     max_kw = max((h.kw_rank for h in hits), default=0.0)
 
-    # Confianza alta: múltiples citas válidas y alta relevancia semántica o léxica
-    if len(valid_citations) >= 2 and (max_sim >= 0.50 or max_kw >= 0.40):
+    # Margen estrecho sobre el mínimo sin apoyo léxico: 'low'
+    if max_sim < (min_sim + 0.05) and max_kw == 0.0:
+        return "low"
+
+    # Confianza alta: 2+ citas válidas o 1 cita con alta similitud/rango léxico
+    if len(valid_citations) >= 2 or (max_sim >= high_sim or max_kw >= 0.40):
         return "high"
 
-    # Confianza media: al menos una cita válida con relevancia razonable
-    if len(valid_citations) >= 1 and (max_sim >= min_sim or max_kw > 0.0):
+    # Confianza media: al menos una cita válida entre mínimo y alto
+    if len(valid_citations) >= 1:
         return "medium"
 
     return "low"

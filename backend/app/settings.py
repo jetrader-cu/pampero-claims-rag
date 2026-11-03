@@ -69,7 +69,8 @@ class Settings(BaseSettings):
 
     # Ingesta y RAG
     parser: Literal["pypdf", "docling"] = "pypdf"
-    rag_min_similarity: float = 0.30
+    rag_min_similarity: float = 0.20
+    rag_high_similarity: float = 0.50
     storage_path: str = "./data/uploads"
 
     # Observabilidad

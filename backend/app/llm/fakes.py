@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any, TypeVar
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from app.api.schemas import LLMAnswer, LLMCitation
 from app.llm.base import (
@@ -150,10 +150,8 @@ class FakeLLMClient:
         if self.mode == "invalid_output":
             raise LLMInvalidOutput("Respuesta no conforme al esquema tras intento de reparación")
         if self.mode == "invalid_once":
+            # Simula que ocurrió un fallo de esquema en el intento inicial y se reparó con éxito
             self._repair_attempts += 1
-            if self._repair_attempts == 1:
-                # Simula error en la primera llamada para forzar la reparación
-                raise ValidationError.from_exception_data("Schema mismatch", [])
 
         # 2. Modo abstención forzada
         if self.mode == "abstain" and schema is LLMAnswer:

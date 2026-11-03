@@ -163,7 +163,13 @@ class AnswerService:
 
         # 5. Formateo y confianza
         final_answer = renumber_citations_in_text(result.value.answer, valid_citations)
-        confidence = decide_confidence(hits, valid_citations, dropped, min_sim=min_sim)
+        confidence = decide_confidence(
+            hits,
+            valid_citations,
+            dropped,
+            min_sim=min_sim,
+            high_sim=settings.rag_high_similarity,
+        )
 
         log_record = QuestionLog(
             tenant_id=principal.tenant_id,

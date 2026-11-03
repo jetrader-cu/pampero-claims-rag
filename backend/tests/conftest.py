@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -68,10 +69,15 @@ async def app_session(app_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, N
         yield session
 
 
+@pytest.fixture
+def app() -> FastAPI:
+    """Instancia de FastAPI para la sesión de prueba."""
+    return create_app()
+
+
 @pytest_asyncio.fixture
-async def client() -> AsyncGenerator[AsyncClient, None]:
+async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     """Cliente HTTP asíncrono para probar la API FastAPI."""
-    app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
