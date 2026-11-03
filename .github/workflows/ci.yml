@@ -78,6 +78,9 @@ jobs:
       - name: Auditoría de vulnerabilidades con pip-audit
         run: uv run pip-audit
 
+      - name: Construcción de imagen Docker del backend
+        run: docker build -t pampero-backend:ci .
+
   frontend:
     name: Frontend (Node 22, lint, tipos, vitest)
     runs-on: ubuntu-latest

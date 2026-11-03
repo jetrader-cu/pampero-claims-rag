@@ -15,6 +15,12 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     timezone="UTC",
     enable_utc=True,
+    beat_schedule={
+        "reap-stale-jobs-every-5-minutes": {
+            "task": "app.worker.tasks.reap_stale_jobs",
+            "schedule": 300.0,
+        },
+    },
 )
 
 celery_app.autodiscover_tasks(["app.worker"])
