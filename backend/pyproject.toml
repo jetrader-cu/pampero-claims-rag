@@ -33,6 +33,7 @@ dependencies = [
     "opentelemetry-instrumentation-logging>=0.49b0",
     "numpy>=2.0.0",
     "filelock>=4.2.1",
+    "email-validator>=2.3.0",
 ]
 
 [project.optional-dependencies]
@@ -101,6 +102,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 markers = [
     "integration: pruebas de integración con servicios externos",
     "docling: pruebas que requieren docling y modelos",

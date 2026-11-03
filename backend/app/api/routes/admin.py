@@ -11,6 +11,7 @@ from app.api.errors import ProblemException
 from app.api.schemas import TenantCreate, TenantOut, UserCreate, UserCreatedOut, UserOut
 from app.core.security import generate_api_key
 from app.db.models import Tenant, User
+from app.db.tenant import set_tenant_context
 
 router = APIRouter(
     prefix="/tenants",
@@ -88,6 +89,9 @@ async def create_tenant_user(
             detail=f"No se encontró el tenant con id '{tenant_id}'",
         )
 
+    # Fijar contexto RLS antes de consultar o insertar usuarios del tenant
+    await set_tenant_context(session, tenant_id)
+
     # Verificar si el usuario ya existe en este tenant
     existing_user = await session.scalar(
         select(User).where(
@@ -135,6 +139,7 @@ async def list_tenant_users(
     session: AsyncSession = Depends(get_db_session),
 ) -> list[User]:
     """Lista los usuarios de un tenant (sin mostrar las claves)."""
+    await set_tenant_context(session, tenant_id)
     result = await session.scalars(
         select(User).where(User.tenant_id == tenant_id).order_by(User.email.asc())
     )
