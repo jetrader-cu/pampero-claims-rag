@@ -70,3 +70,4 @@ def renumber_citations_in_text(answer_text: str, valid_citations: list[Citation]
         return f"{answer_text.rstrip()} {markers}"
 
     return answer_text
+

@@ -109,3 +109,4 @@ def test_renumber_citations_in_text() -> None:
     texto_sin_marcador = "Las lunas están cubiertas."
     renumerado = renumber_citations_in_text(texto_sin_marcador, citas)
     assert "[1]" in renumerado
+
