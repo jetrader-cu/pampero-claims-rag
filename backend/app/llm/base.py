@@ -1,11 +1,56 @@
 """Protocolos base e interfaces comunes para modelos LLM y embeddings."""
 
 import math
-from typing import Any, Protocol, TypeVar
+from dataclasses import dataclass
+from typing import Any, Generic, Protocol, TypeVar
 
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
+
+
+# ==========================================
+# Excepciones de dominio para fallos de LLM
+# ==========================================
+
+
+class LLMError(Exception):
+    """Excepción base para fallos derivados del proveedor de LLM."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class LLMRateLimited(LLMError):
+    """El proveedor de LLM devolvió error 429 por saturación de cuota o concurrencia."""
+
+    def __init__(self, message: str, retry_after_s: int | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_s = retry_after_s or 30
+
+
+class LLMTimeout(LLMError):
+    """La llamada al modelo de lenguaje superó el tiempo máximo de espera establecido."""
+
+
+class LLMUnavailable(LLMError):
+    """El servicio de LLM se encuentra caído o inalcanzable temporalmente."""
+
+
+class LLMInvalidOutput(LLMError):
+    """La respuesta del modelo no cumple el esquema JSON esperado tras reintento de reparación."""
+
+
+@dataclass(frozen=True)
+class LLMResult(Generic[T]):  # noqa: UP046
+    """Resultado tipado de una invocación estructurada al LLM junto con telemetría de uso."""
+
+    value: T
+    model: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    latency_ms: int = 0
 
 
 def normalize_l2(vec: list[float], target_dim: int = 768) -> list[float]:
@@ -66,4 +111,8 @@ class LLMClient(Protocol):
         self, messages: list[dict[str, str]], schema: type[T], **kwargs: Any
     ) -> T:
         """Genera asíncronamente una respuesta estructurada validada contra Pydantic."""
+        ...
+
+    async def chat_structured(self, *, system: str, user: str, schema: type[T]) -> LLMResult[T]:
+        """Ejecuta un diálogo con salida estructurada validada y telemetría de uso."""
         ...

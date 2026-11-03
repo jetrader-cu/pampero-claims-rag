@@ -2,9 +2,9 @@
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 
 class TenantBase(BaseModel):
@@ -112,6 +112,90 @@ class JobOut(BaseModel):
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+
+
+class Citation(BaseModel):
+    """Cita verificada dentro de la respuesta RAG que apunta al fragmento exacto."""
+
+    model_config = ConfigDict(frozen=True)
+
+    index: int = Field(ge=1)
+    chunk_id: uuid.UUID
+    document_id: uuid.UUID
+    document_name: str
+    page: int = Field(ge=1)
+    quote: str = Field(min_length=1, max_length=300)
+
+
+class Usage(BaseModel):
+    """Consumo de tokens y latencia de inferencia."""
+
+    model_config = ConfigDict(frozen=True)
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    latency_ms: int = 0
+
+
+class AnswerResponse(BaseModel):
+    """Respuesta completa y validada retornada al perito o asegurado."""
+
+    status: Literal["answered", "insufficient_evidence"]
+    answer: str = Field(min_length=1, max_length=4000)
+    citations: list[Citation] = Field(default_factory=list)
+    confidence: Literal["high", "medium", "low", "none"]
+    trace_id: str
+    usage: Usage | None = None
+
+    @model_validator(mode="after")
+    def _coherencia(self) -> "AnswerResponse":
+        if self.status == "answered" and not self.citations:
+            raise ValueError(
+                "Una respuesta afirmativa (answered) requiere al menos una cita válida"
+            )
+        if self.status == "insufficient_evidence" and (self.citations or self.confidence != "none"):
+            raise ValueError("Una abstención no puede tener citas y debe tener confianza 'none'")
+        return self
+
+
+class LLMCitation(BaseModel):
+    """Referencia generada por el LLM antes de su validación léxica contra el fragmento."""
+
+    chunk_id: str
+    quote: str = Field(min_length=1, max_length=300)
+
+
+class LLMAnswer(BaseModel):
+    """Respuesta estructurada requerida al modelo de lenguaje."""
+
+    answerable: bool
+    answer: str = Field(max_length=4000)
+    citations: list[LLMCitation] = Field(default_factory=list, max_length=8)
+
+
+class QuestionIn(BaseModel):
+    """Petición de consulta del usuario o perito."""
+
+    question: str = Field(min_length=3, max_length=1000)
+    document_ids: list[uuid.UUID] | None = None
+    top_k: int = Field(default=8, ge=1, le=20)
+
+
+class ChunkOut(BaseModel):
+    """Detalle de un chunk individual para visualización o resaltado en PDF."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    document_id: uuid.UUID
+    chunk_index: int
+    kind: str
+    page_start: int
+    page_end: int
+    heading_path: str | None = None
+    text: str
+    bboxes: list[dict[str, Any]] | None = None
 
 
 class ProblemDetails(BaseModel):
