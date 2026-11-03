@@ -51,4 +51,3 @@ async def test_eliminar_archivo(tmp_path: Path) -> None:
 
     await storage.delete(key)
     assert storage.exists(key) is False
-

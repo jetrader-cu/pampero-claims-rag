@@ -11,4 +11,3 @@ def run_ingestion(job_id: uuid.UUID) -> None:
 def reap_stale_jobs() -> int:
     """Busca y reintenta o marca como fallidos los jobs colgados."""
     raise NotImplementedError("La limpieza de jobs será completada en H2-7")
-

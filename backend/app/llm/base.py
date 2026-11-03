@@ -1,0 +1,69 @@
+"""Protocolos base e interfaces comunes para modelos LLM y embeddings."""
+
+import math
+from typing import Any, Protocol, TypeVar
+
+from pydantic import BaseModel
+
+T = TypeVar("T", bound=BaseModel)
+
+
+def normalize_l2(vec: list[float], target_dim: int = 768) -> list[float]:
+    """Trunca el vector a target_dim y aplica normalización a norma euclídea 1.0 (MRL)."""
+    truncated = vec[:target_dim]
+    if len(truncated) < target_dim:
+        truncated = truncated + [0.0] * (target_dim - len(truncated))
+
+    sq_sum = sum(x * x for x in truncated)
+    norm = math.sqrt(sq_sum)
+
+    if norm <= 1e-12 or math.isnan(norm):
+        res = [0.0] * target_dim
+        res[0] = 1.0
+        return res
+
+    return [x / norm for x in truncated]
+
+
+def cosine_similarity(v1: list[float], v2: list[float]) -> float:
+    """Calcula la similitud coseno entre dos vectores ya normalizados L2."""
+    return sum(a * b for a, b in zip(v1, v2, strict=False))
+
+
+class EmbeddingClient(Protocol):
+    """Protocolo estándar para clientes de generación de embeddings."""
+
+    @property
+    def dim(self) -> int:
+        """Dimensión del vector generado (fijado en 768 para Pampero)."""
+        ...
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Genera embeddings sincronamente para una lista de textos."""
+        ...
+
+    async def aembed(self, texts: list[str]) -> list[list[float]]:
+        """Genera embeddings asíncronamente para una lista de textos."""
+        ...
+
+
+class LLMClient(Protocol):
+    """Protocolo estándar para llamadas de completado y salida estructurada."""
+
+    def generate(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
+        """Genera una respuesta en texto libre a partir del historial de mensajes."""
+        ...
+
+    async def agenerate(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
+        """Genera asíncronamente una respuesta en texto libre."""
+        ...
+
+    def generate_json(self, messages: list[dict[str, str]], schema: type[T], **kwargs: Any) -> T:
+        """Genera una respuesta estructurada validada contra un modelo Pydantic."""
+        ...
+
+    async def agenerate_json(
+        self, messages: list[dict[str, str]], schema: type[T], **kwargs: Any
+    ) -> T:
+        """Genera asíncronamente una respuesta estructurada validada contra Pydantic."""
+        ...
