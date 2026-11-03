@@ -11,10 +11,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.errors import (
     ProblemException,
     http_exception_handler,
+    llm_error_handler,
+    llm_invalid_output_handler,
+    llm_rate_limited_handler,
+    llm_timeout_handler,
+    llm_unavailable_handler,
     problem_exception_handler,
     validation_exception_handler,
 )
 from app.api.routes import admin, chunks, documents, health, jobs, me, questions
+from app.llm.base import (
+    LLMError,
+    LLMInvalidOutput,
+    LLMRateLimited,
+    LLMTimeout,
+    LLMUnavailable,
+)
 from app.settings import get_settings
 
 
@@ -59,6 +71,11 @@ def create_app() -> FastAPI:
     app.add_exception_handler(ProblemException, problem_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(HTTPException, http_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(LLMRateLimited, llm_rate_limited_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(LLMTimeout, llm_timeout_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(LLMInvalidOutput, llm_invalid_output_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(LLMUnavailable, llm_unavailable_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(LLMError, llm_error_handler)  # type: ignore[arg-type]
 
     # Rutas de comprobación de salud en raíz
     app.include_router(health.router)
