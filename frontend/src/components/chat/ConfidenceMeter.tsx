@@ -1,46 +1,50 @@
-import React from "react";
-import type { ConfidenceLevel } from "../../types";
+import { cn } from "../../lib/utils";
+import { Tooltip } from "../ui/tooltip";
 
-interface ConfidenceMeterProps {
-  level: ConfidenceLevel;
-}
+type Level = "high" | "medium" | "low";
 
-export const ConfidenceMeter: React.FC<ConfidenceMeterProps> = ({ level }) => {
-  const labels: Record<ConfidenceLevel, string> = {
-    high: "Confianza alta",
-    medium: "Confianza media",
-    low: "Confianza baja",
-    none: "Sin evidencia suficiente",
-  };
-
-  const getSegmentColor = (index: number) => {
-    if (level === "high") return "bg-[var(--success)]";
-    if (level === "medium") {
-      return index < 2 ? "bg-[var(--warning)]" : "bg-[var(--border)]";
-    }
-    if (level === "low") {
-      return index === 0 ? "bg-[var(--danger)]" : "bg-[var(--border)]";
-    }
-    return "bg-[var(--border)]";
-  };
-
-  return (
-    <div
-      className="inline-flex items-center gap-2 text-xs text-[var(--fg-muted)] font-medium"
-      title={labels[level]}
-      role="img"
-      aria-label={labels[level]}
-    >
-      <div className="flex items-center gap-1">
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            className={`w-3 h-1.5 rounded-xs transition-colors ${getSegmentColor(i)}`}
-          />
-        ))}
-      </div>
-      <span className="text-[11px]">{labels[level]}</span>
-    </div>
-  );
+const COPY: Record<Level, { label: string; aria: string; help: string; filled: number; color: string }> = {
+  high: {
+    label: "Confianza alta",
+    aria: "Nivel de confianza: alto",
+    help: "Varias fuentes coinciden y responden directamente a la pregunta.",
+    filled: 3,
+    color: "bg-success",
+  },
+  medium: {
+    label: "Confianza media",
+    aria: "Nivel de confianza: medio",
+    help: "Las fuentes responden en parte o requieren interpretación. Revisa las citas.",
+    filled: 2,
+    color: "bg-warning",
+  },
+  low: {
+    label: "Confianza baja",
+    aria: "Nivel de confianza: bajo",
+    help: "Evidencia escasa o indirecta. Confirma con el documento antes de decidir.",
+    filled: 1,
+    color: "bg-danger",
+  },
 };
 
+/** La forma (segmentos llenos) y la palabra comunican el nivel, no solo el color. */
+export function ConfidenceMeter({ level }: { level: Level }) {
+  const c = COPY[level];
+  return (
+    <Tooltip content={c.help}>
+      <span
+        role="img"
+        tabIndex={0}
+        aria-label={`${c.aria}. ${c.help}`}
+        className="inline-flex items-center gap-2 rounded-xs text-xs font-medium text-fg-muted"
+      >
+        <span className="flex gap-0.5" aria-hidden="true">
+          {[0, 1, 2].map((i) => (
+            <span key={i} className={cn("h-1 w-3 rounded-full", i < c.filled ? c.color : "bg-border")} />
+          ))}
+        </span>
+        <span aria-hidden="true">{c.label}</span>
+      </span>
+    </Tooltip>
+  );
+}

@@ -1,110 +1,108 @@
-import React, { useState, useRef, useEffect } from "react";
-import { ArrowUp, Sparkles } from "lucide-react";
+import React, { useId, useLayoutEffect } from "react";
+import { ArrowUp, Loader2 } from "lucide-react";
+import { cn } from "../../lib/utils";
+
+const MAX_QUESTION_LENGTH = 1000;
+const COUNTER_FROM = 800;
+const MIN_QUESTION_LENGTH = 3;
+const MAX_HEIGHT_PX = 6 * 24 + 16;
 
 interface QuestionComposerProps {
-  onAsk: (question: string) => Promise<void>;
-  isLoading: boolean;
-  disabled?: boolean;
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: (question: string) => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  pending: boolean;
+  /** Texto que explica por qué no se puede enviar; `null` si se puede. */
+  disabledReason: string | null;
+  helper: string;
 }
 
-const SUGGESTIONS = [
-  "¿Qué coberturas y franquicia incluye la póliza para daños propios?",
-  "¿Cubre asistencia en carretera desde el kilómetro cero?",
-  "¿Cuál es el plazo y requisitos para notificar una reclamación?",
-];
+export function QuestionComposer({
+  value,
+  onChange,
+  onSubmit,
+  textareaRef,
+  pending,
+  disabledReason,
+  helper,
+}: QuestionComposerProps) {
+  const helperId = useId();
+  const trimmed = value.trim();
+  const tooLong = value.length > MAX_QUESTION_LENGTH;
+  const canSend = !disabledReason && !pending && trimmed.length >= MIN_QUESTION_LENGTH && !tooLong;
 
-export const QuestionComposer: React.FC<QuestionComposerProps> = ({
-  onAsk,
-  isLoading,
-  disabled = false,
-}) => {
-  const [question, setQuestion] = useState("");
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`;
+  }, [value, textareaRef]);
 
-  const handleSubmit = async () => {
-    const trimmed = question.trim();
-    if (!trimmed || isLoading || disabled) return;
-
-    setQuestion("");
-    await onAsk(trimmed);
+  const submit = () => {
+    if (canSend) onSubmit(trimmed);
   };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
-
-  // Ajustar altura automáticamente
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.min(
-        textareaRef.current.scrollHeight,
-        140,
-      )}px`;
-    }
-  }, [question]);
 
   return (
-    <div className="flex flex-col gap-2 p-3 bg-[var(--surface)] border-t border-[var(--border)]">
-      {/* Sugerencias rápidas */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-        <Sparkles className="w-3.5 h-3.5 text-[var(--accent)] shrink-0" />
-        <span className="text-[11px] text-[var(--fg-muted)] shrink-0">
-          Sugerencias:
-        </span>
-        {SUGGESTIONS.map((sug, i) => (
-          <button
-            key={i}
-            type="button"
-            onClick={() => {
-              setQuestion(sug);
-              textareaRef.current?.focus();
+    <form
+      className="shrink-0 border-t border-border bg-bg px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <div className="mx-auto w-full max-w-[72ch]">
+        <div
+          className={cn(
+            "flex items-end gap-2 rounded-md border bg-surface p-1.5 pl-3 shadow-xs transition-colors duration-(--dur-fast) focus-within:border-accent",
+            tooLong ? "border-danger" : "border-border-strong/60",
+          )}
+        >
+          <label htmlFor="question-input" className="sr-only">
+            Pregunta
+          </label>
+          <textarea
+            id="question-input"
+            ref={textareaRef}
+            rows={1}
+            value={value}
+            readOnly={pending}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                submit();
+              }
             }}
-            disabled={isLoading || disabled}
-            className="shrink-0 px-2 py-1 rounded-full bg-[var(--sunken)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] text-[11px] text-[var(--fg)] transition-colors border border-[var(--border)] truncate max-w-[280px]"
-          >
-            {sug}
-          </button>
-        ))}
-      </div>
-
-      {/* Caja de entrada de pregunta */}
-      <div className="relative flex items-end gap-2 p-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] focus-within:border-[var(--accent)] focus-within:ring-1 focus-within:ring-[var(--ring)] transition-all">
-        <textarea
-          ref={textareaRef}
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Escribe una pregunta sobre las pólizas o reclamaciones… (Enter para enviar)"
-          rows={1}
-          maxLength={1000}
-          disabled={disabled || isLoading}
-          className="flex-1 max-h-[140px] resize-none border-0 bg-transparent px-2 py-1.5 text-sm text-[var(--fg)] placeholder:text-[var(--fg-muted)] focus:outline-none focus:ring-0 leading-relaxed"
-        />
-
-        <div className="flex items-center gap-1.5 shrink-0 pb-1 pr-1">
-          {question.length >= 800 && (
-            <span className="text-[10px] text-[var(--fg-muted)] tabular-nums">
-              {question.length}/1000
+            placeholder="Pregunta sobre los documentos…"
+            aria-describedby={helperId}
+            aria-invalid={tooLong || undefined}
+            className="max-h-40 min-h-7 flex-1 resize-none bg-transparent py-1 text-sm leading-6 outline-none placeholder:text-fg-muted focus-visible:outline-none"
+          />
+          {value.length >= COUNTER_FROM && (
+            <span
+              className={cn("pb-2 font-mono text-xs tabular-nums", tooLong ? "text-danger" : "text-fg-muted")}
+            >
+              {value.length}/{MAX_QUESTION_LENGTH}
             </span>
           )}
-
           <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={!question.trim() || isLoading || disabled}
-            className="flex items-center justify-center w-8 h-8 rounded-md bg-[var(--accent)] text-[var(--accent-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-xs"
-            title="Enviar consulta (Enter)"
+            type="submit"
+            disabled={!canSend}
             aria-label="Enviar pregunta"
+            className="flex size-8 shrink-0 items-center justify-center rounded-sm bg-accent text-accent-fg transition-opacity duration-(--dur-fast) disabled:opacity-35 pointer-coarse:size-11"
           >
-            <ArrowUp className="w-4 h-4" />
+            {pending ? (
+              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            ) : (
+              <ArrowUp className="size-4" aria-hidden="true" />
+            )}
           </button>
         </div>
+        <p id={helperId} className="mt-1.5 text-xs text-fg-muted">
+          {disabledReason ?? helper}
+        </p>
       </div>
-    </div>
+    </form>
   );
-};
-
+}

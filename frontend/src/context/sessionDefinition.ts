@@ -3,11 +3,13 @@ import type { DemoSession, ThemeMode } from "../types";
 
 export interface SessionContextType {
   session: DemoSession | null;
-  setSession: (session: DemoSession | null) => void;
+  /** Aviso a mostrar en la pantalla de acceso (p. ej. clave revocada). */
+  notice: string | null;
+  signIn: (session: DemoSession) => void;
+  signOut: () => void;
+  expire: (notice: string) => void;
   theme: ThemeMode;
   setTheme: (theme: ThemeMode) => void;
-  toggleTheme: () => void;
 }
 
 export const SessionContext = createContext<SessionContextType | undefined>(undefined);
-

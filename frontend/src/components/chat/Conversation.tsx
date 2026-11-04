@@ -1,153 +1,149 @@
-import React, { useState, useRef, useEffect } from "react";
-import { Loader2, Sparkles } from "lucide-react";
-import { AnswerCard } from "./AnswerCard";
+import { useEffect, useRef, useState } from "react";
+import { useConversation, type Turn } from "../../hooks/useConversation";
+import { plural, readyDocsPhrase } from "../../lib/format";
+import { scrollBehavior } from "../../lib/motion";
+import type { Citation } from "../../types";
+import { SectionLabel } from "../common/SectionLabel";
+import type { CitationActivation } from "../../lib/citation";
+import { ConversationEmpty } from "./ConversationEmpty";
 import { QuestionComposer } from "./QuestionComposer";
-import { askQuestion, ApiError } from "../../api/client";
-import { useSession } from "../../context/useSession";
-import type { Citation, ProblemDetails, Turn } from "../../types";
+import { TurnView } from "./TurnView";
 
-interface ConversationProps {
-  activeCitation: Citation | null;
-  onSelectCitation: (citation: Citation) => void;
-  hasDocuments: boolean;
+export interface ActiveCitation {
+  turnId: string;
+  index: number;
 }
 
-export const Conversation: React.FC<ConversationProps> = ({
+interface ConversationProps {
+  tenantName: string;
+  readyCount: number;
+  processingCount: number;
+  online: boolean;
+  activeCitation: ActiveCitation | null;
+  onOpenCitation: (turnId: string, activation: CitationActivation, answerCitations: Citation[]) => void;
+  onUpload: () => void;
+  canUpload: boolean;
+}
+
+function liveSummary(turns: Turn[]): string {
+  const last = turns[turns.length - 1];
+  if (!last || last.state !== "answered" || !last.answer) return "";
+  if (last.answer.status === "insufficient_evidence") return "No se encontró evidencia suficiente.";
+  const level = { high: "alta", medium: "media", low: "baja", none: "baja" }[last.answer.confidence];
+  return `Respuesta lista, confianza ${level}, ${plural(last.answer.citations.length, "fuente", "fuentes")}.`;
+}
+
+export function Conversation({
+  tenantName,
+  readyCount,
+  processingCount,
+  online,
   activeCitation,
-  onSelectCitation,
-  hasDocuments,
-}) => {
-  const { session } = useSession();
-  const apiKey = session?.apiKey || "";
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [loading, setLoading] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  onOpenCitation,
+  onUpload,
+  canUpload,
+}: ConversationProps) {
+  const { turns, ask, retry, cancelAutoRetry, pending } = useConversation();
+  const [draft, setDraft] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll al añadir turnos
   useEffect(() => {
-    if (typeof bottomRef.current?.scrollIntoView === "function") {
-      bottomRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [turns, loading]);
+    endRef.current?.scrollIntoView?.({ behavior: scrollBehavior(), block: "end" });
+  }, [turns.length]);
 
-  const handleAsk = async (questionText: string) => {
-    const turnId = `turn-${Date.now()}`;
-    const newTurn: Turn = {
-      id: turnId,
-      question: questionText,
-      askedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      loading: true,
-    };
-
-    setTurns((prev) => [...prev, newTurn]);
-    setLoading(true);
-
-    try {
-      const response = await askQuestion({ question: questionText, top_k: 5 }, apiKey);
-      setTurns((prev) =>
-        prev.map((t) =>
-          t.id === turnId ? { ...t, answer: response, loading: false } : t,
-        ),
-      );
-    } catch (err: unknown) {
-      let problem: ProblemDetails;
-      if (err instanceof ApiError) {
-        problem = err.problem;
-      } else {
-        problem = {
-          type: "about:blank",
-          title: "Error de red",
-          status: 500,
-          detail: err instanceof Error ? err.message : "Error inesperado de comunicación",
-          instance: "/questions",
-          code: "network_error",
-        };
+  // «/» lleva a la pregunta desde cualquier sitio, salvo si ya se escribe en un campo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing = target?.closest("input, textarea, [contenteditable='true']");
+      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        textareaRef.current?.focus();
       }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
-      setTurns((prev) =>
-        prev.map((t) => (t.id === turnId ? { ...t, error: problem, loading: false } : t)),
-      );
-    } finally {
-      setLoading(false);
-    }
+  const fillComposer = (text: string, select: boolean) => {
+    setDraft(text);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      if (select) el.select();
+      else el.setSelectionRange(text.length, text.length);
+    });
   };
 
-  const handleRetry = (questionText: string) => {
-    handleAsk(questionText);
-  };
+  const disabledReason = !online
+    ? "Sin conexión. Podrás preguntar cuando vuelva la red."
+    : readyCount === 0
+      ? processingCount > 0
+        ? "Disponible cuando haya un documento listo."
+        : "Sube un documento para empezar a preguntar."
+      : null;
 
   return (
-    <div className="flex flex-col h-full bg-[var(--bg)] overflow-hidden">
-      {/* Cabecera del panel de conversación */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] bg-[var(--surface)] shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-semibold tracking-wider text-[var(--fg-muted)] uppercase">
-            Consultas Periciales
-          </span>
-          <span className="text-xs text-[var(--fg-muted)]">
-            (RAG con verificación estricta de citas)
-          </span>
-        </div>
-      </div>
-
-      {/* Área de mensajes con scroll */}
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
-        {turns.length === 0 ? (
-          <div className="flex flex-col items-center justify-center my-auto py-12 text-center text-[var(--fg-muted)]">
-            <div className="w-12 h-12 rounded-full bg-[var(--surface)] border border-[var(--border)] flex items-center justify-center mb-3 text-[var(--accent)] shadow-xs">
-              <Sparkles className="w-6 h-6" />
-            </div>
-            <h3 className="text-base font-semibold text-[var(--fg)]">
-              Asistente Pampero de Reclamaciones
-            </h3>
-            <p className="text-xs max-w-sm mt-1.5 leading-relaxed">
-              Realiza preguntas sobre las condiciones generales de pólizas, franquicias,
-              exclusiones o peritajes. Las respuestas se justifican con citas textuales literales.
-            </p>
-          </div>
-        ) : (
-          turns.map((turn) => (
-            <div key={turn.id} className="flex flex-col gap-3 max-w-3xl w-full mx-auto">
-              {/* Pregunta del usuario */}
-              <div className="flex items-start gap-2.5 self-end max-w-[85%]">
-                <div className="flex flex-col items-end">
-                  <div className="px-3.5 py-2 rounded-lg rounded-tr-xs bg-[var(--accent)] text-[var(--accent-fg)] text-sm shadow-xs leading-relaxed">
-                    {turn.question}
-                  </div>
-                  <span className="text-[10px] text-[var(--fg-muted)] mt-1 tabular-nums">
-                    {turn.askedAt}
-                  </span>
-                </div>
-              </div>
-
-              {/* Respuesta del asistente o esqueleto de carga */}
-              {turn.loading ? (
-                <div className="flex items-center gap-2.5 p-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] max-w-[90%] text-xs text-[var(--fg-muted)]">
-                  <Loader2 className="w-4 h-4 text-[var(--accent)] animate-spin shrink-0" />
-                  <span>Buscando evidencia documental y verificando citas literales…</span>
-                </div>
-              ) : (
-                <AnswerCard
-                  answer={turn.answer}
-                  error={turn.error}
-                  activeCitation={activeCitation}
-                  onSelectCitation={onSelectCitation}
-                  onRetry={() => handleRetry(turn.question)}
-                />
-              )}
-            </div>
-          ))
+    <section aria-labelledby="conversation-heading" className="flex h-full min-h-0 flex-col bg-bg">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-4">
+        <SectionLabel as="h2" id="conversation-heading">
+          Preguntas
+        </SectionLabel>
+        {turns.length > 0 && (
+          <span className="truncate text-xs text-fg-muted">El historial se borra al recargar la página.</span>
         )}
+      </header>
 
-        <div ref={bottomRef} />
+      <div className="min-h-0 flex-1 overflow-y-auto px-4">
+        {turns.length === 0 ? (
+          <ConversationEmpty
+            tenantName={tenantName}
+            readyCount={readyCount}
+            processingCount={processingCount}
+            canUpload={canUpload}
+            onUpload={onUpload}
+            onSuggestion={(s) => fillComposer(s, false)}
+          />
+        ) : (
+          <ol className="mx-auto flex w-full max-w-[72ch] flex-col gap-10 py-6" aria-label="Historial de preguntas">
+            {turns.map((turn) => (
+              <TurnView
+                key={turn.id}
+                turn={turn}
+                activeIndex={activeCitation?.turnId === turn.id ? activeCitation.index : null}
+                readyDocCount={readyCount}
+                onActivateCitation={(activation) =>
+                  onOpenCitation(turn.id, activation, turn.answer?.citations ?? [])
+                }
+                onRetry={() => retry(turn.id)}
+                onCancelAutoRetry={() => cancelAutoRetry(turn.id)}
+                onRephrase={() => fillComposer(turn.question, true)}
+                onUpload={onUpload}
+              />
+            ))}
+          </ol>
+        )}
+        <div ref={endRef} />
       </div>
 
-      {/* Compositor de preguntas */}
+      <p className="sr-only" aria-live="polite">
+        {liveSummary(turns)}
+      </p>
+
       <QuestionComposer
-        onAsk={handleAsk}
-        isLoading={loading}
-        disabled={!hasDocuments && turns.length === 0}
+        value={draft}
+        onChange={setDraft}
+        onSubmit={(q) => {
+          ask(q);
+          setDraft("");
+        }}
+        textareaRef={textareaRef}
+        pending={pending}
+        disabledReason={disabledReason}
+        helper={`Responde solo con ${readyDocsPhrase(readyCount)}. Enter para enviar, Mayús+Enter para nueva línea.`}
       />
-    </div>
+    </section>
   );
-};
+}

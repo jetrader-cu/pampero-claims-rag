@@ -1,72 +1,76 @@
-import React from "react";
-import { ShieldCheck, Sun, Moon, Building2, UserRound } from "lucide-react";
+import { Building2, ChevronsUpDown, LogOut, Repeat } from "lucide-react";
 import { useSession } from "../../context/useSession";
+import { Monogram } from "../common/Monogram";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
+import { ThemeRadioItems } from "./ThemeMenu";
 
-interface TopBarProps {
-  onOpenSessionModal?: () => void;
+function initials(name: string): string {
+  const base = name.split("@")[0].replace(/[^a-zA-Z0-9]+/g, " ").trim();
+  const parts = base.split(" ").filter(Boolean);
+  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? parts[0]?.[1] ?? "")).toUpperCase() || "··";
 }
 
-export const TopBar: React.FC<TopBarProps> = ({ onOpenSessionModal }) => {
-  const { session, theme, toggleTheme } = useSession();
+export function TopBar({ onSwitchSession }: { onSwitchSession: () => void }) {
+  const { session, signOut } = useSession();
+  if (!session) return null;
 
   return (
-    <header className="flex items-center justify-between h-12 px-4 bg-[var(--surface)] border-b border-[var(--border)] shrink-0 z-10">
-      {/* Marca / Identidad */}
-      <div className="flex items-center gap-2.5">
-        <div className="flex items-center justify-center w-7 h-7 rounded bg-[var(--accent)] text-[var(--accent-fg)] font-bold text-xs shadow-xs">
-          <ShieldCheck className="w-4 h-4" />
-        </div>
-        <div className="flex items-baseline gap-2">
-          <span className="text-sm font-semibold tracking-tight text-[var(--fg)]">
-            Pampero
-          </span>
-          <span className="text-xs text-[var(--fg-muted)] hidden sm:inline">
-            Claims Assistant
-          </span>
-        </div>
-      </div>
-
-      {/* Selector de Tenant / Sesión */}
+    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-surface px-3 sm:px-4">
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onOpenSessionModal}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--sunken)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] text-[var(--fg)] border border-[var(--border)] transition-colors"
-          title="Cambiar organización o usuario de demo"
-        >
-          <Building2 className="w-3.5 h-3.5 text-[var(--accent)]" />
-          <span className="truncate max-w-[140px] sm:max-w-[200px]">
-            {session?.tenantName || "Organización Demo"}
-          </span>
-          <span className="text-[10px] text-[var(--fg-muted)] hidden md:inline">
-            ({session?.userName || "Ajustador"})
-          </span>
-        </button>
+        <Monogram />
+        <span className="hidden text-sm font-semibold tracking-[-0.01em] sm:inline">Claims Assistant</span>
       </div>
+      <span className="hidden h-5 w-px bg-border sm:block" aria-hidden="true" />
 
-      {/* Controles de la derecha: Tema y Usuario */}
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={toggleTheme}
-          className="p-1.5 rounded-md text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--sunken)] transition-colors"
-          title={`Cambiar a tema ${theme === "dark" ? "claro" : "oscuro"}`}
-          aria-label="Alternar tema claro y oscuro"
-        >
-          {theme === "dark" ? (
-            <Sun className="w-4 h-4 text-[var(--warning)]" />
-          ) : (
-            <Moon className="w-4 h-4" />
-          )}
-        </button>
+      <button
+        type="button"
+        onClick={onSwitchSession}
+        aria-label={`Organización actual: ${session.tenantName}. Cambiar sesión`}
+        className="flex h-8 min-w-0 items-center gap-1.5 rounded-sm px-2 text-sm transition-colors duration-(--dur-fast) hover:bg-sunken"
+      >
+        <Building2 className="size-3.5 shrink-0 text-accent" aria-hidden="true" />
+        <span className="truncate font-medium" data-testid="active-tenant">
+          {session.tenantName}
+        </span>
+        <ChevronsUpDown className="size-3.5 shrink-0 text-fg-subtle" aria-hidden="true" />
+      </button>
 
-        <div
-          className="flex items-center justify-center w-7 h-7 rounded-full bg-[var(--sunken)] text-[var(--fg)] text-xs font-semibold border border-[var(--border)]"
-          title={`Conectado como ${session?.userName || "Ajustador"}`}
-        >
-          <UserRound className="w-3.5 h-3.5 text-[var(--fg-muted)]" />
-        </div>
+      <div className="ml-auto">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label={`Menú de ${session.userName}`}
+            className="flex size-8 items-center justify-center rounded-full border border-border bg-sunken font-mono text-2xs font-medium text-fg hover:border-border-strong/60"
+          >
+            {initials(session.userName)}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuLabel className="normal-case tracking-normal">
+              <span className="block truncate text-xs text-fg">{session.userName}</span>
+              <span className="block truncate text-xs font-normal">{session.tenantName}</span>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onSwitchSession}>
+              <Repeat aria-hidden="true" />
+              Cambiar organización o usuario
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Tema</DropdownMenuLabel>
+            <ThemeRadioItems />
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={signOut}>
+              <LogOut aria-hidden="true" />
+              Salir de la demo
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );
-};
+}
