@@ -8,7 +8,7 @@ Este documento recoge las decisiones de diseño técnico, los compromisos asumid
 
 ### 1.1 Chunking y Representación de Tablas
 - **Problema**: Los expedientes de siniestros automotrices combinan cláusulas textuales con tablas densas (desglose de piezas, baremos de horas de taller, bases imponibles e IVA). Un troceado ciego por tamaño de caracteres fragmenta las filas y destruye la relación entre concepto y monto.
-- **Decisión**: 
+- **Decisión**:
   - Extracción estructural mediante `Docling` (con `TableFormer`) y fallback ligero con `pypdf`.
   - Las tablas se extraen como fragmentos (`chunks`) independientes, preservando encabezados de columna en cada fila para mantener la semántica en el espacio vectorial.
   - El texto narrativo se trocea por secciones jerárquicas con solape de cortesía (`overlap`) de 100 caracteres.
@@ -65,17 +65,17 @@ Se realizó un barrido paramétrico sobre el umbral de recuperación `RAG_MIN_SI
 
 ```text
 ----------------------------------------------------------------------------------------
-Umbral   | Cit. Acc   | Ans. Rec   | Abs. Prec  | Abs. Rec   | Abs. F1    | Inj. Res  
+Umbral   | Cit. Acc   | Ans. Rec   | Abs. Prec  | Abs. Rec   | Abs. F1    | Inj. Res
 ----------------------------------------------------------------------------------------
-0.20     | 100.0%     | 100.0%     | 66.7%      | 100.0%     | 0.800      | 100.0%    
-0.25     | 90.0%      | 90.0%      | 57.1%      | 100.0%     | 0.727      | 100.0%    
-0.30     | 70.0%      | 70.0%      | 44.4%      | 100.0%     | 0.615      | 100.0%    
-0.35     | 60.0%      | 60.0%      | 40.0%      | 100.0%     | 0.571      | 100.0%    
-0.40     | 50.0%      | 50.0%      | 36.4%      | 100.0%     | 0.533      | 100.0%    
-0.45     | 50.0%      | 50.0%      | 36.4%      | 100.0%     | 0.533      | 100.0%    
-0.50     | 40.0%      | 40.0%      | 33.3%      | 100.0%     | 0.500      | 100.0%    
-0.55     | 40.0%      | 40.0%      | 33.3%      | 100.0%     | 0.500      | 100.0%    
-0.60     | 40.0%      | 40.0%      | 33.3%      | 100.0%     | 0.500      | 100.0%    
+0.20     | 100.0%     | 100.0%     | 66.7%      | 100.0%     | 0.800      | 100.0%
+0.25     | 90.0%      | 90.0%      | 57.1%      | 100.0%     | 0.727      | 100.0%
+0.30     | 70.0%      | 70.0%      | 44.4%      | 100.0%     | 0.615      | 100.0%
+0.35     | 60.0%      | 60.0%      | 40.0%      | 100.0%     | 0.571      | 100.0%
+0.40     | 50.0%      | 50.0%      | 36.4%      | 100.0%     | 0.533      | 100.0%
+0.45     | 50.0%      | 50.0%      | 36.4%      | 100.0%     | 0.533      | 100.0%
+0.50     | 40.0%      | 40.0%      | 33.3%      | 100.0%     | 0.500      | 100.0%
+0.55     | 40.0%      | 40.0%      | 33.3%      | 100.0%     | 0.500      | 100.0%
+0.60     | 40.0%      | 40.0%      | 33.3%      | 100.0%     | 0.500      | 100.0%
 ----------------------------------------------------------------------------------------
 ```
 
@@ -100,3 +100,4 @@ Conforme a los requisitos de transparencia de la prueba técnica, se documenta d
    - *Compatibilidad en Docker build*: TypeScript deprecó `baseUrl` en tsconfig sin avisar; se requirió ajustar flags para compilación limpia en contenedores Nginx sin conexión externa.
 4. **Validación independiente**:
    - Cada componente fue sometido a la batería completa de linters (`ruff`, `eslint`), comprobadores de tipos estáticos (`mypy --strict`, `tsc --noEmit`), suites de pruebas automatizadas (`pytest` con 82 pruebas, `vitest` con 5 pruebas) y scripts de evaluación cuantitativa end-to-end con aserción obligatoria.
+

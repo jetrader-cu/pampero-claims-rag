@@ -125,8 +125,9 @@ export async function fetchJob(
   return apiFetch<IngestionJobItem>(`/jobs/${jobId}`, { method: "GET" }, apiKey);
 }
 
-export function getDocumentDownloadUrl(docId: string): string {
-  return `${API_BASE}/documents/${docId}/file`;
+export function getDocumentDownloadUrl(docId: string, apiKey?: string): string {
+  const base = `${API_BASE}/documents/${docId}/file`;
+  return apiKey ? `${base}?api_key=${encodeURIComponent(apiKey)}` : base;
 }
 
 export function getJaegerTraceUrl(traceId: string): string {

@@ -8,8 +8,10 @@ import {
   Copy,
   Check,
   FileText,
+  Loader2,
 } from "lucide-react";
 import { getDocumentDownloadUrl } from "../../api/client";
+import { useSession } from "../../context/useSession";
 import type { Citation, DocumentItem } from "../../types";
 
 interface PdfViewerProps {
@@ -23,8 +25,11 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   activeCitation,
   onClose,
 }) => {
+  const { session } = useSession();
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [copied, setCopied] = useState(false);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loadingPdf, setLoadingPdf] = useState(false);
 
   // Sincronizar página si cambia la cita activa
   useEffect(() => {
@@ -32,6 +37,55 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       setCurrentPage(activeCitation.page);
     }
   }, [activeCitation]);
+
+  // Cargar PDF de forma autenticada para crear ObjectURL local
+  useEffect(() => {
+    if (!document || !session?.apiKey) {
+      setBlobUrl(null);
+      return;
+    }
+
+    let isMounted = true;
+    let createdUrl: string | null = null;
+    const directUrl = getDocumentDownloadUrl(document.id, session.apiKey);
+
+    setLoadingPdf(true);
+    fetch(directUrl, {
+      headers: {
+        Authorization: `Bearer ${session.apiKey}`,
+      },
+    })
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`Error ${res.status} al cargar PDF`);
+        }
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!isMounted) return;
+        createdUrl = URL.createObjectURL(blob);
+        setBlobUrl(createdUrl);
+      })
+      .catch((err) => {
+        console.error("Error al cargar blob del PDF:", err);
+        // Fallback a URL directa con query param
+        if (isMounted) {
+          setBlobUrl(directUrl);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setLoadingPdf(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
+      }
+    };
+  }, [document, session?.apiKey]);
 
   if (!document) {
     return (
@@ -45,8 +99,9 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     );
   }
 
-  const downloadUrl = getDocumentDownloadUrl(document.id);
+  const downloadUrl = getDocumentDownloadUrl(document.id, session?.apiKey);
   const totalPages = document.page_count || 1;
+  const currentViewerSrc = (blobUrl || downloadUrl) + `#page=${currentPage}&toolbar=0&navpanes=0`;
 
   const handlePrevPage = () => {
     setCurrentPage((p) => Math.max(1, p - 1));
@@ -165,9 +220,15 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
       {/* Visor PDF embebido */}
       <div className="flex-1 bg-[#525659] relative overflow-hidden">
+        {loadingPdf && (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#525659]/80 z-10 text-white gap-2">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            <span className="text-xs">Cargando documento...</span>
+          </div>
+        )}
         <iframe
           key={`${document.id}-page-${currentPage}`}
-          src={`${downloadUrl}#page=${currentPage}&toolbar=0&navpanes=0`}
+          src={currentViewerSrc}
           title={`Visor PDF de ${document.filename}`}
           className="w-full h-full border-0"
         />

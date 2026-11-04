@@ -4,7 +4,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
-from fastapi import Depends, Header, Security
+from fastapi import Depends, Header, Query, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,17 +27,26 @@ class Principal:
 
 async def get_current_principal(
     credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
+    api_key: str | None = Query(default=None, alias="api_key"),
+    token: str | None = Query(default=None, alias="token"),
 ) -> Principal:
-    """Autentica al usuario mediante Bearer API Key y función auth_lookup."""
-    if credentials is None or not credentials.credentials:
+    """Autentica al usuario mediante Bearer API Key o parámetro de consulta (visor/descarga)."""
+    raw_key: str | None = None
+    if credentials is not None and credentials.credentials:
+        raw_key = credentials.credentials.strip()
+    elif api_key:
+        raw_key = api_key.strip()
+    elif token:
+        raw_key = token.strip()
+
+    if not raw_key:
         raise ProblemException(
             status_code=401,
             code="missing_credentials",
             title="Credenciales ausentes",
-            detail="Se requiere cabecera 'Authorization: Bearer <api_key>'",
+            detail="Se requiere cabecera 'Authorization: Bearer <api_key>' o parámetro ?api_key",
         )
 
-    raw_key = credentials.credentials.strip()
     key_hash = hash_api_key(raw_key)
 
     async with async_session_maker() as session:

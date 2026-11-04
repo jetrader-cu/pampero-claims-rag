@@ -90,7 +90,7 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
-      - pampero_storage:/app/data/uploads
+      - ./backend/data/uploads:/app/data/uploads
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -120,7 +120,7 @@ services:
       API_KEY_PEPPER: ${API_KEY_PEPPER:-pampero-default-pepper-secret}
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-lgtm:4317"
     volumes:
-      - pampero_storage:/app/data/uploads
+      - ./backend/data/uploads:/app/data/uploads
     depends_on:
       migrate:
         condition: service_completed_successfully
