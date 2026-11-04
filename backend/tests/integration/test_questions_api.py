@@ -127,7 +127,7 @@ async def test_pregunta_sin_evidencia(
     assert data["status"] == "insufficient_evidence"
     assert data["citations"] == []
     assert data["confidence"] == "none"
-    assert "No se encontró evidencia" in data["answer"]
+    assert "evidencia suficiente" in data["answer"]
 
 
 @pytest.mark.asyncio

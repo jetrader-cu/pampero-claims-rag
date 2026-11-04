@@ -13,12 +13,14 @@ from app.llm.factory import get_embedding_client, get_llm_client
 from app.metrics import llm_request_duration_seconds, llm_tokens_total, rag_questions_total
 from app.rag.citations import renumber_citations_in_text, validate_citations
 from app.rag.confidence import decide_confidence
-from app.rag.prompts import SYSTEM_PROMPT, generate_nonce, render_context
+from app.rag.prompts import build_system_prompt, generate_nonce, render_context
 from app.rag.retrieval import HybridRetriever
 from app.settings import get_settings
 from app.telemetry import get_tracer
 
 logger = logging.getLogger(__name__)
+
+ABSTAIN_ANSWER = "No encontré evidencia suficiente en los documentos para responder."
 
 
 class AnswerService:
@@ -91,7 +93,7 @@ class AnswerService:
 
             return AnswerResponse(
                 status="insufficient_evidence",
-                answer="No se encontró evidencia suficiente ni cláusulas aplicables a su consulta.",
+                answer=ABSTAIN_ANSWER,
                 citations=[],
                 confidence="none",
                 trace_id=trace_id,
@@ -99,6 +101,7 @@ class AnswerService:
 
         # 3. Construcción del prompt seguro con nonce
         nonce = generate_nonce()
+        system_prompt = build_system_prompt(nonce)
         user_prompt = render_context(q.question, hits, nonce)
 
         # 4. Inferencia estructurada
@@ -112,7 +115,7 @@ class AnswerService:
             chat_span.set_attribute("gen_ai.request.model", settings.llm_model)
 
             result = await self.llm.chat_structured(
-                system=SYSTEM_PROMPT,
+                system=system_prompt,
                 user=user_prompt,
                 schema=LLMAnswer,
             )
@@ -154,7 +157,7 @@ class AnswerService:
 
             return AnswerResponse(
                 status="insufficient_evidence",
-                answer=result.value.answer,
+                answer=ABSTAIN_ANSWER,
                 citations=[],
                 confidence="none",
                 trace_id=trace_id,
@@ -162,7 +165,9 @@ class AnswerService:
             )
 
         # PUERTA 3: Validación léxica estricta de citas
-        valid_citations, dropped = validate_citations(result.value.citations, hits)
+        valid_citations, dropped, index_map = validate_citations(
+            result.value.citations, hits, return_map=True
+        )
 
         if not valid_citations:
             logger.info("Consulta rechazada por Puerta 3 (sin citas textuales verificables)")
@@ -186,7 +191,7 @@ class AnswerService:
 
             return AnswerResponse(
                 status="insufficient_evidence",
-                answer="La respuesta formulada no pudo ser respaldada literalmente con citas.",
+                answer=ABSTAIN_ANSWER,
                 citations=[],
                 confidence="none",
                 trace_id=trace_id,
@@ -194,7 +199,7 @@ class AnswerService:
             )
 
         # 5. Formateo y confianza
-        final_answer = renumber_citations_in_text(result.value.answer, valid_citations)
+        final_answer = renumber_citations_in_text(result.value.answer, valid_citations, index_map)
         confidence = decide_confidence(
             hits,
             valid_citations,

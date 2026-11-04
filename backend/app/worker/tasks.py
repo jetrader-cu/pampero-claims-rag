@@ -3,12 +3,21 @@
 import logging
 import uuid
 
+from app.ingest.errors import TransientIngestError
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(name="app.worker.tasks.ingest_document", bind=True, max_retries=5)  # type: ignore[untyped-decorator]
+@celery_app.task(  # type: ignore[untyped-decorator]
+    name="app.worker.tasks.ingest_document",
+    bind=True,
+    autoretry_for=(TransientIngestError,),
+    retry_backoff=5,
+    retry_backoff_max=120,
+    retry_jitter=True,
+    max_retries=5,
+)
 def ingest_document(self: object, job_id: str) -> None:
     """Tarea Celery para procesar un documento en segundo plano."""
     try:
@@ -32,10 +41,13 @@ def reap_stale_jobs() -> int:
         return 0
 
 
-def enqueue_ingestion_job(job_id: uuid.UUID) -> str | None:
+def enqueue_ingestion_job(job_id: uuid.UUID, task_id: str | None = None) -> str | None:
     """Encola un trabajo de ingesta en Celery de forma segura."""
     try:
-        task = ingest_document.delay(str(job_id))
+        if task_id:
+            task = ingest_document.apply_async(args=[str(job_id)], task_id=task_id)
+        else:
+            task = ingest_document.delay(str(job_id))
         return str(task.id)
     except Exception as exc:
         logger.warning("No se pudo encolar en Celery el job %s: %s", job_id, exc)

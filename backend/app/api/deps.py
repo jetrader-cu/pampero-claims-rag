@@ -61,9 +61,16 @@ async def db_for_tenant(
     principal: Principal = Depends(get_current_principal),
 ) -> AsyncGenerator[AsyncSession, None]:
     """Proporciona una sesión asíncrona con el tenant_id fijado en la transacción RLS."""
-    async with async_session_maker() as session, session.begin():
+    async with async_session_maker() as session:
         await set_tenant_context(session, principal.tenant_id)
-        yield session
+        try:
+            yield session
+            if session.is_active:
+                await session.commit()
+        except Exception:
+            if session.is_active:
+                await session.rollback()
+            raise
 
 
 async def require_admin_token(

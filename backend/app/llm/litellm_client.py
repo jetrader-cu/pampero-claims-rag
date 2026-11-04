@@ -1,10 +1,9 @@
 """Adaptadores para LiteLLM con renormalización Matryoshka (768d) y reintentos."""
 
 import asyncio
-import json
 import logging
 import time
-from typing import Any, TypeVar
+from typing import TypeVar
 
 import litellm
 import litellm.exceptions
@@ -18,7 +17,6 @@ from app.llm.base import (
     LLMUnavailable,
     normalize_l2,
 )
-from app.llm.fakes import FakeLLMClient, HashingEmbeddingClient
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -33,12 +31,10 @@ class LiteLLMEmbeddingClient:
         self,
         model: str | None = None,
         dim: int = 768,
-        fallback_client: HashingEmbeddingClient | None = None,
     ) -> None:
         settings = get_settings()
         self.model = model or settings.embedding_model
         self._dim = dim
-        self.fallback = fallback_client or HashingEmbeddingClient(dim=dim)
 
     @property
     def dim(self) -> int:
@@ -54,12 +50,12 @@ class LiteLLMEmbeddingClient:
             embeddings = [item["embedding"] for item in response.data]
             return [normalize_l2(emb, target_dim=self._dim) for emb in embeddings]
         except Exception as exc:
-            logger.warning(
-                "Error en llamada a LiteLLM embedding (%s: %s). Usando fallback determinista",
-                self.model,
-                exc,
-            )
-            return self.fallback.embed(texts)
+            err_msg = str(exc).lower()
+            if "rate limit" in err_msg or "429" in err_msg:
+                raise LLMRateLimited(str(exc), retry_after_s=30) from exc
+            if "timeout" in err_msg:
+                raise LLMTimeout(str(exc)) from exc
+            raise LLMUnavailable(str(exc)) from exc
 
     async def aembed(self, texts: list[str]) -> list[list[float]]:
         """Versión asíncrona delegando en hilo de ejecución."""
@@ -81,68 +77,6 @@ class LiteLLMClient:
         self.fallback_model = fallback_model or settings.llm_fallback_model
         self.timeout_s = timeout_s
         self.max_retries = max_retries
-        self._fake_fallback = FakeLLMClient(model_name=self.model)
-
-    def generate(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
-        """Completa el diálogo con el modelo principal o fallback ante rate limit."""
-        try:
-            response = litellm.completion(
-                model=self.model,
-                messages=messages,
-                **kwargs,
-            )
-            content = response.choices[0].message.content
-            return str(content) if content is not None else ""
-        except litellm.exceptions.RateLimitError as rle:
-            logger.warning(
-                "Rate limit en %s (%s). Intentando modelo fallback %s",
-                self.model,
-                rle,
-                self.fallback_model,
-            )
-            try:
-                response = litellm.completion(
-                    model=self.fallback_model,
-                    messages=messages,
-                    **kwargs,
-                )
-                content = response.choices[0].message.content
-                return str(content) if content is not None else ""
-            except Exception as exc2:
-                logger.error("Fallo también en modelo fallback (%s)", exc2)
-                return self._fake_fallback.generate(messages, **kwargs)
-        except Exception as exc:
-            logger.warning(
-                "Error general en LiteLLM.completion (%s). Aplicando fallback simulado", exc
-            )
-            return self._fake_fallback.generate(messages, **kwargs)
-
-    async def agenerate(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
-        return await asyncio.to_thread(self.generate, messages, **kwargs)
-
-    def generate_json(self, messages: list[dict[str, str]], schema: type[T], **kwargs: Any) -> T:
-        """Genera respuesta estructurada asegurando conformidad con el esquema Pydantic."""
-        try:
-            response = litellm.completion(
-                model=self.model,
-                messages=messages,
-                response_format={"type": "json_object"},
-                **kwargs,
-            )
-            raw_content = response.choices[0].message.content or "{}"
-            data = json.loads(raw_content)
-            return schema.model_validate(data)
-        except Exception as exc:
-            logger.warning("Fallo en generate_json (%s). Usando fallback sintético", exc)
-            return self._fake_fallback.generate_json(messages, schema, **kwargs)
-
-    async def agenerate_json(
-        self, messages: list[dict[str, str]], schema: type[T], **kwargs: Any
-    ) -> T:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, lambda: self.generate_json(messages, schema, **kwargs)
-        )
 
     async def chat_structured(self, *, system: str, user: str, schema: type[T]) -> LLMResult[T]:
         """Ejecuta inferencia estructurada con ciclo de reparación ante errores de esquema."""

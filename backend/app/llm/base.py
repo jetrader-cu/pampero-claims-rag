@@ -2,7 +2,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import Any, Generic, Protocol, TypeVar
+from typing import Generic, Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -93,25 +93,7 @@ class EmbeddingClient(Protocol):
 
 
 class LLMClient(Protocol):
-    """Protocolo estándar para llamadas de completado y salida estructurada."""
-
-    def generate(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
-        """Genera una respuesta en texto libre a partir del historial de mensajes."""
-        ...
-
-    async def agenerate(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
-        """Genera asíncronamente una respuesta en texto libre."""
-        ...
-
-    def generate_json(self, messages: list[dict[str, str]], schema: type[T], **kwargs: Any) -> T:
-        """Genera una respuesta estructurada validada contra un modelo Pydantic."""
-        ...
-
-    async def agenerate_json(
-        self, messages: list[dict[str, str]], schema: type[T], **kwargs: Any
-    ) -> T:
-        """Genera asíncronamente una respuesta estructurada validada contra Pydantic."""
-        ...
+    """Protocolo estándar para llamadas estructuradas con telemetría de uso."""
 
     async def chat_structured(self, *, system: str, user: str, schema: type[T]) -> LLMResult[T]:
         """Ejecuta un diálogo con salida estructurada validada y telemetría de uso."""

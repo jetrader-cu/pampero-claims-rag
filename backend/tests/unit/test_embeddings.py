@@ -73,13 +73,12 @@ def test_factorias_llm_y_embeddings() -> None:
     assert "Pampero FAKE response" in respuesta
 
 
-def test_litellm_embedding_fallback_seguro() -> None:
-    """Verifica que LiteLLMEmbeddingClient recurra al cliente fake si no hay conexión externa."""
-    # Inicializado con modelo inexistente o sin api keys
-    cliente_litellm = LiteLLMEmbeddingClient(model="invalido/modelo-no-existente", dim=768)
-    vectores = cliente_litellm.embed(["Prueba de fallback sin red"])
+def test_litellm_embedding_lanza_error_ante_fallo_proveedor() -> None:
+    """Verifica que LiteLLMEmbeddingClient no silencie errores y lance excepción tipada."""
+    import pytest
 
-    assert len(vectores) == 1
-    assert len(vectores[0]) == 768
-    norma = math.sqrt(sum(x * x for x in vectores[0]))
-    assert math.isclose(norma, 1.0, rel_tol=1e-5)
+    from app.llm.base import LLMUnavailable
+
+    cliente_litellm = LiteLLMEmbeddingClient(model="invalido/modelo-no-existente", dim=768)
+    with pytest.raises(LLMUnavailable):
+        cliente_litellm.embed(["Prueba sin fallback silencioso"])

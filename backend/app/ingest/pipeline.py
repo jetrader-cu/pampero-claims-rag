@@ -38,7 +38,10 @@ def run_ingestion(job_id: uuid.UUID) -> None:
 
     if tenant_id is None:
         logger.error("No se encontró tenant para el job_id %s", job_id)
-        return
+        raise TransientIngestError(
+            message=f"No se encontró tenant para job {job_id} (posible carrera)",
+            code="job_tenant_not_found",
+        )
 
     # 2. Reclamar el job y fijar contexto de RLS
     with sync_session_maker() as session:
@@ -55,6 +58,21 @@ def run_ingestion(job_id: uuid.UUID) -> None:
         if job.status in ("succeeded", "failed", "dead_letter"):
             logger.info("Job %s ya está en estado terminal %s", job_id, job.status)
             return
+
+        # Cerrojo consultivo transaccional para evitar procesamiento concurrente
+        lock_res = session.execute(
+            text("SELECT pg_try_advisory_xact_lock(hashtext(:doc_id))"),
+            {"doc_id": str(job.document_id)},
+        ).scalar()
+        if not lock_res:
+            logger.warning(
+                "Documento %s ocupado por otro worker concurrente. Reintentando...",
+                job.document_id,
+            )
+            raise TransientIngestError(
+                message=f"Documento {job.document_id} bajo proceso concurrente",
+                code="concurrent_document_lock",
+            )
 
         doc_stmt = select(Document).where(Document.id == job.document_id).with_for_update()
         doc = session.execute(doc_stmt).scalar_one_or_none()
@@ -198,7 +216,11 @@ def run_ingestion(job_id: uuid.UUID) -> None:
                     session.add(chunk_row)
 
                 # Actualizar documento
-                doc_row = session.get(Document, doc_id)
+                doc_row = (
+                    session.execute(select(Document).where(Document.id == doc_id).with_for_update())
+                    .scalars()
+                    .first()
+                )
                 if doc_row:
                     doc_row.status = "ready"
                     doc_row.stage = None
@@ -293,6 +315,9 @@ def run_ingestion(job_id: uuid.UUID) -> None:
 
             session.commit()
 
+        if is_transient and attempt < max_attempts:
+            raise exc
+
 
 def reap_stale_jobs(minutes_threshold: int = 15) -> int:
     """Identifica y recupera trabajos de ingesta colgados en ejecución (timeout > 15m)."""
@@ -317,13 +342,13 @@ def reap_stale_jobs(minutes_threshold: int = 15) -> int:
             doc = session.get(Document, job.document_id)
 
             if attempt >= max_attempts:
-                job.status = "failed"
+                job.status = "dead_letter"
                 job.finished_at = now_utc
                 job.error_code = "timeout"
                 job.error_detail = "El trabajo excedió el tiempo máximo de ejecución de 15 minutos"
 
                 if doc:
-                    doc.status = "failed"
+                    doc.status = "dead_letter"
                     doc.stage = None
                     doc.error_code = "timeout"
                     doc.error_detail = job.error_detail
@@ -337,6 +362,12 @@ def reap_stale_jobs(minutes_threshold: int = 15) -> int:
                     doc.stage = None
 
             session.commit()
+
+            if attempt < max_attempts:
+                from app.worker.tasks import enqueue_ingestion_job
+
+                enqueue_ingestion_job(j_id)
+
             reaped_count += 1
 
     return reaped_count

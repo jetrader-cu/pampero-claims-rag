@@ -72,21 +72,21 @@ async def upload_document(
         chunk_count=0,
         ocr_used=False,
     )
+    task_id = str(uuid.uuid4())
     job = IngestionJob(
         id=job_id,
         tenant_id=principal.tenant_id,
         document_id=doc_id,
         status="queued",
+        celery_task_id=task_id,
         attempt=0,
     )
 
     db.add(doc)
     db.add(job)
-    await db.flush()
+    await db.commit()
 
-    task_id = enqueue_ingestion_job(job_id)
-    if task_id:
-        job.celery_task_id = task_id
+    enqueue_ingestion_job(job_id, task_id=task_id)
 
     response.status_code = status.HTTP_202_ACCEPTED
     return UploadAccepted(
@@ -116,7 +116,9 @@ async def get_document(
     db: AsyncSession = Depends(db_for_tenant),
 ) -> DocumentOut:
     """Obtiene los metadatos y estado de procesamiento de un documento específico."""
-    stmt = select(Document).where(Document.id == document_id)
+    stmt = (
+        select(Document).where(Document.id == document_id).execution_options(populate_existing=True)
+    )
     result = await db.execute(stmt)
     doc = result.scalar_one_or_none()
 
@@ -138,7 +140,9 @@ async def get_document_file(
     db: AsyncSession = Depends(db_for_tenant),
 ) -> FileResponse:
     """Descarga o visualiza el archivo PDF original almacenado."""
-    stmt = select(Document).where(Document.id == document_id)
+    stmt = (
+        select(Document).where(Document.id == document_id).execution_options(populate_existing=True)
+    )
     result = await db.execute(stmt)
     doc = result.scalar_one_or_none()
 
@@ -179,7 +183,9 @@ async def reprocess_document(
     db: AsyncSession = Depends(db_for_tenant),
 ) -> UploadAccepted:
     """Solicita el reprocesamiento de un documento existente."""
-    stmt = select(Document).where(Document.id == document_id)
+    stmt = (
+        select(Document).where(Document.id == document_id).execution_options(populate_existing=True)
+    )
     result = await db.execute(stmt)
     doc = result.scalar_one_or_none()
 
@@ -219,19 +225,19 @@ async def reprocess_document(
     doc.error_code = None
     doc.error_detail = None
 
+    task_id = str(uuid.uuid4())
     job = IngestionJob(
         id=new_job_id,
         tenant_id=principal.tenant_id,
         document_id=doc.id,
         status="queued",
+        celery_task_id=task_id,
         attempt=0,
     )
     db.add(job)
-    await db.flush()
+    await db.commit()
 
-    task_id = enqueue_ingestion_job(new_job_id)
-    if task_id:
-        job.celery_task_id = task_id
+    enqueue_ingestion_job(new_job_id, task_id=task_id)
 
     response.status_code = status.HTTP_202_ACCEPTED
     return UploadAccepted(

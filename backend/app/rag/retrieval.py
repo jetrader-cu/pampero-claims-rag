@@ -1,6 +1,5 @@
 """Módulo de recuperación híbrida (RRF) combinando búsqueda vectorial y texto unaccent."""
 
-import contextlib
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -79,8 +78,11 @@ class HybridRetriever:
         """Ejecuta la búsqueda híbrida con fusión recíproca RRF (k=60) y filtro de tenant."""
         # Configurar optimizaciones locales en la sesión para pgvector HNSW
         await session.execute(text("SET LOCAL hnsw.ef_search = 100"))
-        with contextlib.suppress(Exception):
-            await session.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
+        try:
+            async with session.begin_nested():
+                await session.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
+        except Exception:
+            pass
 
         # Formato de vector compatible con PostgreSQL pgvector
         vec_str = "[" + ",".join(str(x) for x in query_vector) + "]"
