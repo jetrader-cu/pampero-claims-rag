@@ -198,98 +198,142 @@ class PypdfParser:
         return current[:-1] + [new_heading]
 
 
+_DOCLING_CONVERTER: Any = None
+
+
+def _docling_converter() -> Any:
+    """Conversor de Docling compartido por el proceso.
+
+    Crear un DocumentConverter carga los modelos de layout, tablas y OCR (decenas de segundos en
+    CPU): se hace una sola vez por proceso del worker, no una vez por documento.
+    """
+    global _DOCLING_CONVERTER
+    if _DOCLING_CONVERTER is None:
+        base_models = importlib.import_module("docling.datamodel.base_models")
+        options = importlib.import_module("docling.datamodel.pipeline_options")
+        converter_mod = importlib.import_module("docling.document_converter")
+        pipeline_options = options.PdfPipelineOptions(
+            do_ocr=True,  # Docling solo aplica OCR a las regiones sin capa de texto
+            do_table_structure=True,
+            ocr_options=options.RapidOcrOptions(),
+        )
+        _DOCLING_CONVERTER = converter_mod.DocumentConverter(
+            format_options={
+                base_models.InputFormat.PDF: converter_mod.PdfFormatOption(
+                    pipeline_options=pipeline_options
+                )
+            }
+        )
+    return _DOCLING_CONVERTER
+
+
+def _pages_without_text(file_path: Path) -> int:
+    """Cuenta páginas sin capa de texto: si hay alguna, su contenido llegó por OCR."""
+    pdf = pdfium.PdfDocument(str(file_path))
+    try:
+        return sum(1 for page in pdf if not page.get_textpage().get_text_range().strip())
+    finally:
+        pdf.close()
+
+
+_DOCLING_SKIP_LABELS = {"page_header", "page_footer", "picture", "caption"}
+_DOCLING_HEADING_LABELS = {"title", "section_header"}
+
+
 class DoclingParser:
-    """Parser estructurado que utiliza Docling con fallback seguro a PypdfParser."""
+    """Parser con Docling: layout, tablas con TableFormer y OCR para escaneados.
+
+    Devuelve coordenadas de cada elemento con origen arriba-izquierda en puntos PDF, que es lo
+    que necesita el visor para dibujar el resaltado sobre la página.
+    """
 
     def __init__(self) -> None:
         self._fallback_parser = PypdfParser()
 
     def parse(self, file_path: Path) -> ParsedDocument:
-        """Intenta extraer la estructura con Docling; ante cualquier fallo delega en fallback."""
+        """Convierte el PDF; si Docling no está instalado usa pypdf (modo ligero de desarrollo)."""
         try:
-            docling_converter = importlib.import_module("docling.document_converter")
-            converter_cls = docling_converter.DocumentConverter
-            converter = converter_cls()
-            result = converter.convert(str(file_path))
-            doc = result.document
-
-            elements: list[ParsedElement] = []
-            current_heading_path: list[str] = []
-
-            for item, _level in doc.iterate_items():
-                label = getattr(item, "label", "text").lower()
-                text = getattr(item, "text", "").strip()
-                if not text and label != "table":
-                    continue
-
-                page_no = 1
-                prov = getattr(item, "prov", None)
-                if prov and len(prov) > 0:
-                    page_no = getattr(prov[0], "page_no", 1)
-
-                if "title" in label or "header" in label or "heading" in label:
-                    current_heading_path = [text]
-                    elements.append(
-                        ParsedElement(
-                            kind="heading",
-                            text=text,
-                            heading_path=list(current_heading_path),
-                            page_number=page_no,
-                        )
-                    )
-                elif "table" in label:
-                    # Extracción de tabla Docling si está disponible
-                    table_data: list[list[str]] = []
-                    df = getattr(item, "export_to_dataframe", None)
-                    if callable(df):
-                        table_df = df()
-                        table_data = [
-                            [str(col) for col in table_df.columns],
-                            *[[str(val) for val in row] for row in table_df.values],
-                        ]
-                    elements.append(
-                        ParsedElement(
-                            kind="table",
-                            text=text or "Tabla estructurada",
-                            heading_path=list(current_heading_path),
-                            page_number=page_no,
-                            table_data=table_data if table_data else None,
-                        )
-                    )
-                elif "list" in label:
-                    elements.append(
-                        ParsedElement(
-                            kind="list_item",
-                            text=text,
-                            heading_path=list(current_heading_path),
-                            page_number=page_no,
-                        )
-                    )
-                else:
-                    elements.append(
-                        ParsedElement(
-                            kind="text",
-                            text=text,
-                            heading_path=list(current_heading_path),
-                            page_number=page_no,
-                        )
-                    )
-
-            page_count = len(getattr(doc, "pages", [])) or 1
-            return ParsedDocument(
-                elements=elements,
-                metadata={"parser": "docling"},
-                ocr_used=False,
-                page_count=page_count,
-            )
-
-        except Exception as exc:
-            logger.warning(
-                "Docling no disponible o falló durante el parseo de %s (%s). Aplicando fallback",
-                file_path.name,
-                exc,
-            )
+            converter = _docling_converter()
+        except ImportError:
+            logger.warning("Docling no está instalado; se usa pypdf sin OCR para %s", file_path)
             return self._fallback_parser.parse(file_path)
+
+        doc = converter.convert(str(file_path)).document
+        elements: list[ParsedElement] = []
+        heading_path: list[str] = []
+
+        for item, _level in doc.iterate_items():
+            label = str(getattr(item, "label", "text")).lower()
+            if label in _DOCLING_SKIP_LABELS:
+                continue
+            prov = item.prov[0] if getattr(item, "prov", None) else None
+            page_no = int(prov.page_no) if prov else 1
+            bbox = self._bbox_top_left(doc, prov)
+
+            if label == "table":
+                markdown = item.export_to_markdown(doc=doc).strip()
+                if not markdown:
+                    continue
+                elements.append(
+                    ParsedElement(
+                        kind="table",
+                        text=markdown,
+                        heading_path=list(heading_path),
+                        page_number=page_no,
+                        bbox=bbox,
+                        # Con filas y cabecera separadas el chunker puede partir tablas largas
+                        # repitiendo la cabecera en cada parte.
+                        table_data=self._table_rows(item, doc),
+                    )
+                )
+                continue
+
+            text = (getattr(item, "text", "") or "").strip()
+            if not text:
+                continue
+            if label in _DOCLING_HEADING_LABELS:
+                heading_path = [text]
+                kind: ElementKind = "heading"
+            elif label == "list_item":
+                kind = "list_item"
+            else:
+                kind = "text"
+            elements.append(
+                ParsedElement(
+                    kind=kind,
+                    text=text,
+                    heading_path=list(heading_path),
+                    page_number=page_no,
+                    bbox=bbox,
+                )
+            )
+
+        return ParsedDocument(
+            elements=elements,
+            metadata={"parser": "docling"},
+            ocr_used=_pages_without_text(file_path) > 0,
+            page_count=len(doc.pages) or 1,
+        )
+
+    @staticmethod
+    def _table_rows(item: Any, doc: Any) -> list[list[str]] | None:
+        try:
+            frame = item.export_to_dataframe(doc=doc)
+        except Exception:  # la exportación tabular es opcional: queda el Markdown
+            return None
+        if frame.empty:
+            return None
+        return [[str(c) for c in frame.columns], *[[str(v) for v in r] for r in frame.values]]
+
+    @staticmethod
+    def _bbox_top_left(doc: Any, prov: Any) -> tuple[float, float, float, float] | None:
+        if prov is None:
+            return None
+        page = doc.pages.get(prov.page_no)
+        if page is None or page.size is None:
+            return None
+        box = prov.bbox.to_top_left_origin(page_height=page.size.height)
+        return (round(box.l, 1), round(box.t, 1), round(box.r, 1), round(box.b, 1))
 
 
 def get_parser(name: str | None = None) -> Parser:

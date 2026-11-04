@@ -14,11 +14,28 @@ Cumple con el hito H6-1 del PRD:
 
 from io import BytesIO
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+import pypdfium2 as pdfium
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Image as RLImage, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+
+def _rasterizar_como_escaneo(pdf_path: Path, dpi: int = 150) -> None:
+    """Convierte el PDF en uno solo de imagen, como sale de un escáner: sin capa de texto.
+
+    Así el documento solo se puede leer con OCR, que es exactamente lo que se quiere probar.
+    """
+    pdf = pdfium.PdfDocument(str(pdf_path))
+    paginas = []
+    for page in pdf:
+        img = page.render(scale=dpi / 72).to_pil().convert("L")
+        # Leve giro y desenfoque: un escaneo real nunca está perfectamente alineado.
+        img = img.rotate(0.4, expand=False, fillcolor=255).filter(ImageFilter.GaussianBlur(0.4))
+        paginas.append(img.convert("RGB"))
+    pdf.close()
+    paginas[0].save(pdf_path, "PDF", resolution=dpi, save_all=True, append_images=paginas[1:])
 
 
 def _crear_imagen_escaneada(titulo: str, lineas: list[str]) -> BytesIO:
@@ -572,61 +589,6 @@ def generar_documento_inyeccion(dest: Path) -> None:
     doc.build(story)
 
 
-def generar_poliza_hogar(dest: Path) -> None:
-    """Genera documento multipágina con secciones y tablas para tests de integración."""
-    from reportlab.platypus import PageBreak
-
-    doc = SimpleDocTemplate(str(dest), pagesize=A4, leftMargin=40, rightMargin=40, topMargin=40, bottomMargin=40)
-    styles = getSampleStyleSheet()
-    story = []
-
-    h1_style = ParagraphStyle("H1", parent=styles["Heading1"], fontSize=16, leading=20, textColor=colors.HexColor("#1e3a8a"))
-    h2_style = ParagraphStyle("H2", parent=styles["Heading2"], fontSize=12, leading=15, textColor=colors.HexColor("#0f172a"))
-    body_style = styles["Normal"]
-
-    # Página 1: Daños materiales
-    story.append(Paragraph("PÓLIZA MULTIRRIESGO HOGAR INTEGRAL", h1_style))
-    story.append(Spacer(1, 10))
-    story.append(Paragraph("SECCIÓN I: DAÑOS MATERIALES Y CONTINENTE", h2_style))
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("1.1 Incendio, explosión y caída de rayo. Quedan amparados los daños directos al continente y contenido.", body_style))
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("1.2 Daños por agua e inundación. Cubre rotura accidental de tuberías de distribución y desagüe.", body_style))
-    story.append(PageBreak())
-
-    # Página 2: Responsabilidad Civil y Tabla
-    story.append(Paragraph("SECCIÓN II: RESPONSABILIDAD CIVIL Y FIANZAS", h2_style))
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("2.1 Responsabilidad Civil Privada y Familiar hasta 300.000 EUR.", body_style))
-    story.append(Paragraph("2.2 Cobertura de daños a colindantes por filtraciones.", body_style))
-    story.append(Spacer(1, 12))
-    data_rc = [
-        ["Concepto Garantizado", "Capital Asegurado", "Franquicia Aplicable"],
-        ["Continente Edificado", "180.000 EUR", "0 EUR"],
-        ["Contenido y Mobiliario", "45.000 EUR", "0 EUR"],
-        ["Joyas y Objetos de Valor", "6.000 EUR", "100 EUR"],
-    ]
-    t = Table(data_rc, colWidths=[200, 150, 150])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e2e8f0")),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#94a3b8")),
-        ("PADDING", (0, 0), (-1, -1), 6),
-    ]))
-    story.append(t)
-    story.append(PageBreak())
-
-    # Página 3: Exclusiones
-    story.append(Paragraph("SECCIÓN III: EXCLUSIONES GENERALES", h2_style))
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("Quedan expresamente excluidos de todas las coberturas de la presente póliza:", body_style))
-    story.append(Paragraph("- Hechos atribuibles a dolo o mala fe demostrada del asegurado.", body_style))
-    story.append(Paragraph("- Fenómenos de la naturaleza consorciables asumidos por el Consorcio de Compensación de Seguros.", body_style))
-    story.append(Paragraph("- Desgaste paulatino, corrosión y vicios ocultos de construcción.", body_style))
-
-    doc.build(story)
-
-
 def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
     samples_dir = repo_root / "samples"
@@ -644,21 +606,18 @@ def main() -> None:
     generar_peritaje_norte(norte_dir / "peritaje_SIN-2024-9901.pdf")
     generar_factura_norte(norte_dir / "factura_FAC-2024-104.pdf")
     generar_escaneado_norte(norte_dir / "declaracion_escaneada.pdf")
+    _rasterizar_como_escaneo(norte_dir / "declaracion_escaneada.pdf")
 
     print("Generando documentos para Pampero Sur...")
     generar_poliza_sur(sur_dir / "poliza_AP-2024-0088.pdf")
     generar_peritaje_sur(sur_dir / "peritaje_SIN-2024-9901.pdf")
     generar_factura_sur(sur_dir / "factura_FAC-2024-550.pdf")
     generar_escaneado_sur(sur_dir / "informe_escaneado.pdf")
+    _rasterizar_como_escaneo(sur_dir / "informe_escaneado.pdf")
 
     print("Generando documentos comunes de prueba y seguridad...")
     generar_archivo_corrupto(comun_dir / "archivo_corrupto.pdf")
-    generar_archivo_corrupto(samples_dir / "archivo_corrupto.pdf")
     generar_documento_inyeccion(comun_dir / "documento_inyeccion.pdf")
-
-    # Muestras históricas para pruebas de integración existentes
-    generar_poliza_norte(samples_dir / "poliza_basica_auto.pdf")
-    generar_poliza_hogar(samples_dir / "condiciones_generales_hogar.pdf")
 
     print("Muestras sintéticas generadas exitosamente en:")
     print(f" - {norte_dir}")

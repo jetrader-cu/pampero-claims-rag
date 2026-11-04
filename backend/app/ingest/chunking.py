@@ -183,6 +183,10 @@ def chunk_document(
 
             table_prefix = build_context_prefix(filename, element.heading_path)
             table_meta: dict[str, Any] = {"heading_path": element.heading_path}
+            # La tabla entera es la región a resaltar en el visor, también si se parte por filas
+            table_bboxes = (
+                [{"page": element.page_number, "bbox": element.bbox}] if element.bbox else None
+            )
 
             if element.table_data and len(element.table_data) > 1:
                 headers = element.table_data[0]
@@ -204,6 +208,7 @@ def chunk_document(
                             token_count=tokens,
                             content_hash=compute_content_hash(table_full),
                             table_metadata=table_meta,
+                            bboxes=table_bboxes,
                         )
                     )
                     chunk_index += 1
@@ -228,6 +233,7 @@ def chunk_document(
                                     token_count=count_tokens(chunk_full),
                                     content_hash=compute_content_hash(chunk_full),
                                     table_metadata=table_meta,
+                                    bboxes=table_bboxes,
                                 )
                             )
                             chunk_index += 1
@@ -250,6 +256,7 @@ def chunk_document(
                                 token_count=count_tokens(chunk_full),
                                 content_hash=compute_content_hash(chunk_full),
                                 table_metadata=table_meta,
+                                bboxes=table_bboxes,
                             )
                         )
                         chunk_index += 1
@@ -268,6 +275,7 @@ def chunk_document(
                         token_count=count_tokens(table_full),
                         content_hash=compute_content_hash(table_full),
                         table_metadata=table_meta,
+                        bboxes=table_bboxes,
                     )
                 )
                 chunk_index += 1

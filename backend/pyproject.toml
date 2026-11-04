@@ -34,12 +34,30 @@ dependencies = [
     "numpy>=2.0.0",
     "filelock>=4.2.1",
     "email-validator>=2.3.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
 worker = [
     "docling>=2.145.0",
+    "rapidocr>=3.4",
+    "onnxruntime>=1.20",
+    # Declarados aquí para que uv aplique el índice CPU (las fuentes solo valen para
+    # dependencias directas).
+    "torch>=2.4",
+    "torchvision>=0.19",
 ]
+
+# torch (dependencia de Docling) desde el índice CPU: el de PyPI trae CUDA y varios GB de
+# librerías de NVIDIA que el worker no usa.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
 
 [dependency-groups]
 dev = [
