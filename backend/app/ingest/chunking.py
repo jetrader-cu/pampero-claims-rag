@@ -185,7 +185,9 @@ def chunk_document(
             table_meta: dict[str, Any] = {"heading_path": element.heading_path}
             # La tabla entera es la región a resaltar en el visor, también si se parte por filas
             table_bboxes = (
-                [{"page": element.page_number, "bbox": element.bbox}] if element.bbox else None
+                [{"page": element.page_number, "bbox": element.bbox, "coord_origin": "TOPLEFT"}]
+                if element.bbox
+                else None
             )
 
             if element.table_data and len(element.table_data) > 1:
@@ -292,7 +294,9 @@ def chunk_document(
 
         page_end = element.page_number
         if element.bbox:
-            current_bboxes.append({"page": element.page_number, "bbox": element.bbox})
+            current_bboxes.append(
+                {"page": element.page_number, "bbox": element.bbox, "coord_origin": "TOPLEFT"}
+            )
 
         text_buffer.append(element.text)
 

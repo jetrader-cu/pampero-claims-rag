@@ -100,3 +100,22 @@ def test_indices_secuenciales() -> None:
     assert len(chunks) >= 3
     indices = [c.chunk_index for c in chunks]
     assert indices == list(range(len(chunks)))
+
+
+def test_bboxes_de_texto_y_tabla_declaran_origen_arriba_izquierda() -> None:
+    """El visor necesita saber el origen de coordenadas para no invertir el eje Y."""
+    from app.ingest.chunking import chunk_document
+    from app.ingest.parsing import ParsedDocument, ParsedElement
+
+    doc = ParsedDocument(
+        elements=[
+            ParsedElement(kind="text", text="Franquicia de 300 euros.", bbox=(46, 50, 300, 60)),
+            ParsedElement(
+                kind="table", text="| a | b |\n|---|---|\n| 1 | 2 |", bbox=(40, 80, 500, 200)
+            ),
+        ],
+        page_count=1,
+    )
+    chunks = chunk_document(doc, filename="poliza.pdf")
+    origenes = {b["coord_origin"] for c in chunks for b in (c.bboxes or [])}
+    assert origenes == {"TOPLEFT"}
