@@ -171,7 +171,7 @@ export async function downloadDocument(
 
 /** Grafana local del stack `otel-lgtm` (docker-compose), usado si no se configura otra. */
 const DEFAULT_TRACE_URL_TEMPLATE =
-  "http://localhost:3000/explore?left=%7B%22queries%22:%5B%7B%22query%22:%22{traceId}%22%7D%5D%7D";
+  "http://localhost:3000/explore?left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22datasource%22:%7B%22type%22:%22tempo%22,%22uid%22:%22tempo%22%7D,%22queryType%22:%22traceql%22,%22query%22:%22{traceId}%22%7D%5D%7D";
 
 export function getTraceUrl(traceId: string): string {
   const template = import.meta.env.VITE_TRACE_URL_TEMPLATE || DEFAULT_TRACE_URL_TEMPLATE;

@@ -1,5 +1,5 @@
 version: "1.0"
-description: "Banco de evaluación pericial RAG — 16 casos de prueba estructurados"
+description: "Banco de evaluación pericial RAG — 18 casos de prueba estructurados"
 
 questions:
   # --- 10 PREGUNTAS RESPONDIBLES ---
