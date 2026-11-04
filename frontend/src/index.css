@@ -1,114 +1,254 @@
 @import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Tokens de diseño (doc 03 §3). Es el ÚNICO archivo con valores de color:
+ * los componentes usan las utilidades generadas (bg-surface, text-fg-muted…).
+ */
+:root {
+  --bg: #fafaf9;
+  --surface: #ffffff;
+  --sunken: #f3f3f1;
+  --border: #e4e4e0;
+  --border-strong: #8a8d93;
+  --fg: #17181a;
+  --fg-muted: #5d6066;
+  --fg-subtle: #6e7177;
+  --accent: #0e6b68;
+  --accent-fg: #ffffff;
+  --accent-soft: #e3f1f0;
+  --success: #1a7f45;
+  --success-soft: #e6f4ec;
+  --warning: #9a5b00;
+  --warning-soft: #fbf1df;
+  --danger: #c2352b;
+  --danger-soft: #fce9e7;
+  --info: #2f5fae;
+  --info-soft: #e8effa;
+  /* El PDF nunca se invierte: el resaltado siempre se pinta sobre papel blanco. */
+  --highlight: #fdecb0;
+  --page-paper: #ffffff;
+  --overlay: rgb(23 24 26 / 0.4);
+
+  --shadow-xs: 0 1px 0 rgb(23 24 26 / 0.04);
+  --shadow-sm: 0 1px 2px rgb(23 24 26 / 0.06), 0 0 0 1px rgb(23 24 26 / 0.04);
+  --shadow-md: 0 8px 24px -6px rgb(23 24 26 / 0.12), 0 0 0 1px rgb(23 24 26 / 0.05);
+  --shadow-lg: 0 24px 48px -12px rgb(23 24 26 / 0.18);
+
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dark {
+  --bg: #0e0f11;
+  --surface: #16171a;
+  --sunken: #1c1e21;
+  --border: #2a2c30;
+  --border-strong: #6b6e75;
+  --fg: #ececea;
+  --fg-muted: #a1a3a8;
+  --fg-subtle: #8e9096;
+  --accent: #4fc4bc;
+  --accent-fg: #06201f;
+  --accent-soft: #12302e;
+  --success: #4cc27a;
+  --success-soft: #12291c;
+  --warning: #e3a33b;
+  --warning-soft: #2e2410;
+  --danger: #f0786c;
+  --danger-soft: #33181a;
+  --info: #7fa7ee;
+  --info-soft: #16223a;
+  --overlay: rgb(0 0 0 / 0.6);
+
+  --shadow-xs: 0 1px 0 rgb(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --shadow-md: 0 8px 24px -6px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-lg: 0 24px 48px -12px rgb(0 0 0 / 0.7);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-highlight: var(--highlight);
+  --color-paper: var(--page-paper);
+  --color-overlay: var(--overlay);
+  --color-ring: var(--accent);
+
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --text-2xs: 11px;
+  --text-2xs--line-height: 16px;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 14px;
+  --text-sm--line-height: 20px;
+  --text-base: 15px;
+  --text-base--line-height: 24px;
+  --text-lg: 17px;
+  --text-lg--line-height: 24px;
+  --text-xl: 20px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 32px;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  --ease-out: var(--ease-out);
+  --ease-in-out: var(--ease-in-out);
+
+  --animate-rise: rise var(--dur-base) var(--ease-out) both;
+  --animate-fade: fade var(--dur-base) var(--ease-out) both;
+  --animate-pulse-hit: pulse-hit 600ms var(--ease-out) 1 both;
+  --animate-indeterminate: indeterminate 1.2s linear infinite;
+  --animate-shimmer: shimmer 1.4s linear infinite;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pulse-hit {
+  0% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0.85; }
+}
+@keyframes indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
 
 @layer base {
-  :root {
-    --bg: #FAFAF9;
-    --surface: #FFFFFF;
-    --sunken: #F3F3F1;
-    --border: #E4E4E0;
-    --border-strong: #8A8D93;
-    --fg: #17181A;
-    --fg-muted: #5D6066;
-    --fg-subtle: #6E7177;
-    --accent: #0E6B68;
-    --accent-fg: #FFFFFF;
-    --accent-soft: #E3F1F0;
-    --success: #1A7F45;
-    --success-soft: #E6F4EC;
-    --warning: #9A5B00;
-    --warning-soft: #FBF1DF;
-    --danger: #C2352B;
-    --danger-soft: #FCE9E7;
-    --info: #2F5FAE;
-    --info-soft: #E8EFFA;
-    --highlight: #FDECB0;
-    --ring: #0E6B68;
-
-    /* Mapeo estándar */
-    --background: var(--bg);
-    --foreground: var(--fg);
-    --card: var(--surface);
-    --card-foreground: var(--fg);
-    --popover: var(--surface);
-    --popover-foreground: var(--fg);
-    --primary: var(--accent);
-    --primary-foreground: var(--accent-fg);
-    --muted: var(--sunken);
-    --muted-foreground: var(--fg-muted);
-    --destructive: var(--danger);
-    --destructive-foreground: #FFFFFF;
-    --input: var(--border-strong);
-    --radius: 0.5rem;
+  html {
+    color-scheme: light;
   }
-
-  .dark {
-    --bg: #0E0F11;
-    --surface: #16171A;
-    --sunken: #1C1E21;
-    --border: #2A2C30;
-    --border-strong: #6B6E75;
-    --fg: #ECECEA;
-    --fg-muted: #A1A3A8;
-    --fg-subtle: #8E9096;
-    --accent: #4FC4BC;
-    --accent-fg: #06201F;
-    --accent-soft: #12302E;
-    --success: #4CC27A;
-    --success-soft: #12291C;
-    --warning: #E3A33B;
-    --warning-soft: #2E2410;
-    --danger: #F0786C;
-    --danger-soft: #33181A;
-    --info: #7FA7EE;
-    --info-soft: #16223A;
-    --highlight: #5A4A12;
-    --ring: #4FC4BC;
-
-    --background: var(--bg);
-    --foreground: var(--fg);
-    --card: var(--surface);
-    --card-foreground: var(--fg);
-    --popover: var(--surface);
-    --popover-foreground: var(--fg);
-    --primary: var(--accent);
-    --primary-foreground: var(--accent-fg);
-    --muted: var(--sunken);
-    --muted-foreground: var(--fg-muted);
-    --destructive: var(--danger);
-    --destructive-foreground: #FFFFFF;
-    --input: var(--border-strong);
+  body {
+    margin: 0;
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 20px;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--fg);
+  }
+  /* Anillo de foco único: 2 px de acento separado 2 px del fondo. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
   }
 }
 
-body {
-  margin: 0;
-  min-height: 100vh;
-  background-color: var(--bg);
-  color: var(--fg);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@utility skeleton {
+  border-radius: var(--radius-xs);
+  background: linear-gradient(90deg, var(--sunken) 25%, var(--border) 50%, var(--sunken) 75%);
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
 }
 
-.tabular-nums {
-  font-variant-numeric: tabular-nums;
+/* Área táctil ≥ 44 px sin agrandar el dibujo (citas [n], iconos pequeños). */
+@utility touch-target {
+  position: relative;
+  @media (pointer: coarse) {
+    &::after {
+      content: "";
+      position: absolute;
+      inset: 50% auto auto 50%;
+      width: 44px;
+      height: 44px;
+      transform: translate(-50%, -50%);
+    }
+  }
 }
 
-/* Scrollbars sutiles */
+/* Capa de texto de pdf.js: los trozos que contienen la cita. */
+.pdf-hit {
+  background: var(--highlight);
+  mix-blend-mode: multiply;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 40%, transparent);
+  opacity: 0.85;
+  animation: var(--animate-pulse-hit);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+  .skeleton {
+    animation: none;
+    background: var(--sunken);
+  }
+}
+
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
-
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 3px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
-
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-strong);
+  background-clip: content-box;
 }

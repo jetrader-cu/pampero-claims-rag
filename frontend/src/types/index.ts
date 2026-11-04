@@ -14,9 +14,7 @@ export type IngestionStage =
 export interface DocumentItem {
   id: string;
   tenant_id: string;
-  uploaded_by: string;
   filename: string;
-  sha256_hex: string;
   size_bytes: number;
   page_count: number | null;
   status: IngestionStatus;
@@ -31,21 +29,9 @@ export interface DocumentItem {
 
 export interface UploadAccepted {
   document_id: string;
-  job_id: string;
+  job_id: string | null;
   status: string;
   duplicate: boolean;
-}
-
-export interface IngestionJobItem {
-  id: string;
-  document_id: string;
-  status: IngestionStatus;
-  attempt: number;
-  max_attempts: number;
-  started_at: string | null;
-  finished_at: string | null;
-  error_code: string | null;
-  error_detail: string | null;
 }
 
 export interface Citation {
@@ -85,10 +71,34 @@ export interface ProblemDetails {
   title: string;
   status: number;
   detail: string;
-  instance: string;
+  instance?: string;
   code: string;
-  trace_id?: string;
+  trace_id?: string | null;
   invalid_params?: { name: string; reason: string }[];
+}
+
+/** Rectángulo en puntos PDF: [x0, y0, x1, y1]. */
+export type BBox = [number, number, number, number];
+
+export interface ChunkBBox {
+  page: number;
+  bbox: BBox;
+  /** Si el backend lo indica; por convención PDF se asume BOTTOMLEFT. */
+  coord_origin?: "BOTTOMLEFT" | "TOPLEFT";
+}
+
+export interface ChunkOut {
+  id: string;
+  document_id: string;
+  page_start: number;
+  page_end: number;
+  text: string;
+  bboxes: ChunkBBox[] | null;
+}
+
+export interface MeResponse {
+  user: { id: string; tenant_id: string; email: string; api_key_prefix: string };
+  tenant: { id: string; slug: string; name: string };
 }
 
 export interface DemoSession {
@@ -97,23 +107,6 @@ export interface DemoSession {
   userId: string;
   userName: string;
   apiKey: string;
-}
-
-export const DEFAULT_DEMO_SESSION: DemoSession = {
-  tenantId: "tenant-demo-norte",
-  tenantName: "Aseguradora Norte",
-  userId: "user-demo-1",
-  userName: "Ajustador Pericial",
-  apiKey: "pampero_key_demo_norte",
-};
-
-export interface Turn {
-  id: string;
-  question: string;
-  askedAt: string;
-  answer?: AnswerResponse;
-  error?: ProblemDetails;
-  loading?: boolean;
 }
 
 export type ThemeMode = "light" | "dark" | "system";
