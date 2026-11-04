@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     embedding_provider: Literal["fake", "litellm"] = "fake"
     embedding_model: str = "gemini/gemini-embedding-001"
     embedding_dim: int = 768
+    llm_timeout_s: float = 20.0
+    llm_max_retries: int = 2
     gemini_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
 
@@ -77,6 +79,7 @@ class Settings(BaseSettings):
     otel_service_name: str = "pampero-api"
     otel_exporter_otlp_endpoint: str = "http://localhost:4317"
     otel_traces_sampler: str = "parentbased_always_on"
+    otel_export_enabled: bool = True
 
     # Puertos
     web_port: int = 5173

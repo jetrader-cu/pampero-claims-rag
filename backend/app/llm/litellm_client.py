@@ -1,6 +1,7 @@
 """Adaptadores para LiteLLM con renormalización Matryoshka (768d) y reintentos."""
 
 import asyncio
+import json
 import logging
 import time
 from typing import TypeVar
@@ -33,8 +34,14 @@ class LiteLLMEmbeddingClient:
         dim: int = 768,
     ) -> None:
         settings = get_settings()
-        self.model = model or settings.embedding_model
+        self._model = model or settings.embedding_model
         self._dim = dim
+        self.timeout_s = settings.llm_timeout_s
+        self.max_retries = settings.llm_max_retries
+
+    @property
+    def model(self) -> str:
+        return self._model
 
     @property
     def dim(self) -> int:
@@ -46,7 +53,13 @@ class LiteLLMEmbeddingClient:
             return []
 
         try:
-            response = litellm.embedding(model=self.model, input=texts)
+            response = litellm.embedding(
+                model=self._model,
+                input=texts,
+                dimensions=self._dim,
+                timeout=self.timeout_s,
+                num_retries=self.max_retries,
+            )
             embeddings = [item["embedding"] for item in response.data]
             return [normalize_l2(emb, target_dim=self._dim) for emb in embeddings]
         except Exception as exc:
@@ -69,19 +82,25 @@ class LiteLLMClient:
         self,
         model: str | None = None,
         fallback_model: str | None = None,
-        timeout_s: float = 45.0,
-        max_retries: int = 2,
+        timeout_s: float | None = None,
+        max_retries: int | None = None,
     ) -> None:
         settings = get_settings()
         self.model = model or settings.llm_model
         self.fallback_model = fallback_model or settings.llm_fallback_model
-        self.timeout_s = timeout_s
-        self.max_retries = max_retries
+        self.timeout_s = settings.llm_timeout_s if timeout_s is None else timeout_s
+        self.max_retries = settings.llm_max_retries if max_retries is None else max_retries
 
     async def chat_structured(self, *, system: str, user: str, schema: type[T]) -> LLMResult[T]:
         """Ejecuta inferencia estructurada con ciclo de reparación ante errores de esquema."""
+        # json_object funciona igual en Gemini y OpenAI; el esquema va en el mensaje para que el
+        # modelo conozca los campos exactos, y Pydantic valida igualmente la respuesta.
+        schema_hint = json.dumps(schema.model_json_schema(), ensure_ascii=False)
         messages: list[dict[str, str]] = [
-            {"role": "system", "content": system},
+            {
+                "role": "system",
+                "content": f"{system}\n\nEsquema JSON de la respuesta:\n{schema_hint}",
+            },
             {"role": "user", "content": user},
         ]
         start_time = time.perf_counter()

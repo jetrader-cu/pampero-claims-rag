@@ -34,6 +34,11 @@ class HashingEmbeddingClient:
         self._dim = dim
 
     @property
+    def model(self) -> str:
+        # Nombre propio: los vectores de hashing nunca deben compararse con los de un modelo real.
+        return f"hashing-{self._dim}"
+
+    @property
     def dim(self) -> int:
         return self._dim
 

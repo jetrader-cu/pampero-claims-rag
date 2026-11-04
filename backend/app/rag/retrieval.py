@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.settings import get_settings
+from app.llm.factory import get_embedding_client
 
 
 @dataclass
@@ -63,7 +63,9 @@ class HybridRetriever:
     """Recuperador híbrido que combina similitud coseno en pgvector y búsqueda léxica."""
 
     def __init__(self, model_name: str | None = None) -> None:
-        self.model_name = model_name or get_settings().embedding_model
+        # Se filtra por el espacio vectorial del cliente activo, no por la configuración:
+        # con el proveedor falso el nombre configurado no describe los vectores guardados.
+        self.model_name = model_name or get_embedding_client().model
 
     async def search(
         self,

@@ -14,13 +14,13 @@ from app.ingest.chunking import chunk_document
 from app.ingest.errors import PermanentIngestError, TransientIngestError
 from app.ingest.parsing import get_parser
 from app.ingest.storage import get_storage
+from app.llm.base import LLMError
 from app.llm.factory import get_embedding_client
 from app.metrics import (
     ingest_task_duration_seconds,
     ingest_task_failures_total,
     ingest_task_retries_total,
 )
-from app.settings import get_settings
 from app.telemetry import get_tracer
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 def run_ingestion(job_id: uuid.UUID) -> None:
     """Ejecuta el pipeline completo y atómico de ingesta para un trabajo específico."""
-    settings = get_settings()
 
     # 1. Recuperar tenant_id mediante job_lookup (función SECURITY DEFINER sin RLS inicial)
     with sync_session_maker() as raw_session:
@@ -58,21 +57,6 @@ def run_ingestion(job_id: uuid.UUID) -> None:
         if job.status in ("succeeded", "failed", "dead_letter"):
             logger.info("Job %s ya está en estado terminal %s", job_id, job.status)
             return
-
-        # Cerrojo consultivo transaccional para evitar procesamiento concurrente
-        lock_res = session.execute(
-            text("SELECT pg_try_advisory_xact_lock(hashtext(:doc_id))"),
-            {"doc_id": str(job.document_id)},
-        ).scalar()
-        if not lock_res:
-            logger.warning(
-                "Documento %s ocupado por otro worker concurrente. Reintentando...",
-                job.document_id,
-            )
-            raise TransientIngestError(
-                message=f"Documento {job.document_id} bajo proceso concurrente",
-                code="concurrent_document_lock",
-            )
 
         doc_stmt = select(Document).where(Document.id == job.document_id).with_for_update()
         doc = session.execute(doc_stmt).scalar_one_or_none()
@@ -162,12 +146,12 @@ def run_ingestion(job_id: uuid.UUID) -> None:
         # c) Embedding
         t0 = time.perf_counter()
         with tracer.start_as_current_span("ingest.embed") as span:
-            span.set_attribute("embedding.model", settings.embedding_model)
-            span.set_attribute("embedding.dim", settings.embedding_dim)
+            emb_client = get_embedding_client()
+            span.set_attribute("embedding.model", emb_client.model)
+            span.set_attribute("embedding.dim", emb_client.dim)
             span.set_attribute("ingest.chunks", len(chunks_data))
 
             texts = [c.text for c in chunks_data]
-            emb_client = get_embedding_client()
             embeddings = emb_client.embed(texts)
 
         ingest_task_duration_seconds.record(
@@ -190,6 +174,15 @@ def run_ingestion(job_id: uuid.UUID) -> None:
             with sync_session_maker() as session:
                 set_sync_tenant_context(session, tenant_id)
 
+                # Bloquear la fila del documento ANTES de tocar sus chunks: dos ejecuciones del
+                # mismo job (reentrega de Redis) quedan en serie y la última reemplaza el conjunto
+                # completo, en vez de chocar con UNIQUE(document_id, chunk_index).
+                doc_row = (
+                    session.execute(select(Document).where(Document.id == doc_id).with_for_update())
+                    .scalars()
+                    .first()
+                )
+
                 # Limpiar chunks previos si era reprocesamiento
                 del_stmt = text("DELETE FROM chunks WHERE document_id = :doc_id")
                 session.execute(del_stmt, {"doc_id": str(doc_id)})
@@ -211,16 +204,11 @@ def run_ingestion(job_id: uuid.UUID) -> None:
                         token_count=c_data.token_count,
                         bboxes=c_data.bboxes,
                         embedding=emb,
-                        embedding_model=settings.embedding_model,
+                        embedding_model=emb_client.model,
                     )
                     session.add(chunk_row)
 
                 # Actualizar documento
-                doc_row = (
-                    session.execute(select(Document).where(Document.id == doc_id).with_for_update())
-                    .scalars()
-                    .first()
-                )
                 if doc_row:
                     doc_row.status = "ready"
                     doc_row.stage = None
@@ -272,8 +260,10 @@ def run_ingestion(job_id: uuid.UUID) -> None:
             session.commit()
 
     except Exception as exc:
-        is_transient = isinstance(exc, TransientIngestError)
-        code = getattr(exc, "code", "processing_error")
+        # Todo lo que no es permanente se reintenta: red, 429/timeout del proveedor, BD caída y
+        # también errores inesperados. Agotados los intentos acaba en dead_letter, que es
+        # reprocesable; así un fallo transitorio nunca se marca como «archivo inválido».
+        code = getattr(exc, "code", None) or _error_code(exc)
         detail = str(exc)
         logger.warning(
             "Error en ingesta de %s (intento %d/%d): %s",
@@ -289,7 +279,8 @@ def run_ingestion(job_id: uuid.UUID) -> None:
             job_row = session.get(IngestionJob, job_id)
 
             if attempt >= max_attempts:
-                status_final = "dead_letter" if is_transient else "failed"
+                status_final = "dead_letter"
+                ingest_task_failures_total.add(1, {"error_code": code})
                 if doc_row:
                     doc_row.status = status_final
                     doc_row.stage = None
@@ -302,9 +293,10 @@ def run_ingestion(job_id: uuid.UUID) -> None:
                     job_row.error_code = code
                     job_row.error_detail = detail
             else:
-                # Reintentable: vuelve a quedar queued para que el worker o retry lo procese
+                # Reintentable: queda queued hasta que Celery vuelva a ejecutar la tarea
                 if doc_row:
                     doc_row.status = "queued"
+                    doc_row.stage = None
                     doc_row.error_code = code
                     doc_row.error_detail = detail
 
@@ -315,8 +307,20 @@ def run_ingestion(job_id: uuid.UUID) -> None:
 
             session.commit()
 
-        if is_transient and attempt < max_attempts:
-            raise exc
+        if attempt < max_attempts:
+            if isinstance(exc, TransientIngestError):
+                raise
+            raise TransientIngestError(message=str(exc), code=code) from exc
+
+
+def _error_code(exc: Exception) -> str:
+    """Código estable para errores que no traen uno propio (se muestra en la UI y en métricas)."""
+    if isinstance(exc, LLMError):
+        return {
+            "LLMRateLimited": "embedding_rate_limited",
+            "LLMTimeout": "embedding_timeout",
+        }.get(type(exc).__name__, "embedding_unavailable")
+    return "processing_error"
 
 
 def reap_stale_jobs(minutes_threshold: int = 15) -> int:
@@ -370,4 +374,21 @@ def reap_stale_jobs(minutes_threshold: int = 15) -> int:
 
             reaped_count += 1
 
-    return reaped_count
+    return reaped_count + _requeue_orphan_jobs()
+
+
+def _requeue_orphan_jobs(minutes_threshold: int = 10) -> int:
+    """Reencola jobs que siguen en cola sin que Celery los haya ejecutado (encolado perdido)."""
+    from app.worker.tasks import enqueue_ingestion_job
+
+    with sync_session_maker() as session:
+        rows = session.execute(
+            text("SELECT id, tenant_id FROM orphan_queued_jobs_lookup(:threshold)"),
+            {"threshold": minutes_threshold},
+        ).fetchall()
+
+    requeued = 0
+    for j_id, _tenant_id in rows:
+        if enqueue_ingestion_job(j_id) is not None:
+            requeued += 1
+    return requeued

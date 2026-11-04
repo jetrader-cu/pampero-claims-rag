@@ -79,6 +79,11 @@ class EmbeddingClient(Protocol):
     """Protocolo estándar para clientes de generación de embeddings."""
 
     @property
+    def model(self) -> str:
+        """Identificador del espacio vectorial; se guarda en cada chunk para no mezclar modelos."""
+        ...
+
+    @property
     def dim(self) -> int:
         """Dimensión del vector generado (fijado en 768 para Pampero)."""
         ...
