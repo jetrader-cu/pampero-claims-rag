@@ -24,3 +24,16 @@ celery_app.conf.update(
 )
 
 celery_app.autodiscover_tasks(["app.worker"])
+
+
+from celery.signals import worker_process_init  # noqa: E402
+
+
+@worker_process_init.connect  # type: ignore[untyped-decorator]
+def on_worker_process_init(**kwargs: object) -> None:
+    """Inicializa telemetría y logging tras el fork del proceso worker (prefork)."""
+    from app.core.logging import setup_logging
+    from app.telemetry import init_telemetry
+
+    setup_logging()
+    init_telemetry(service_name="pampero-worker", is_worker=True)

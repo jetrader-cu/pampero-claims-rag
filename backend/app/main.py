@@ -20,6 +20,7 @@ from app.api.errors import (
     validation_exception_handler,
 )
 from app.api.routes import admin, chunks, documents, health, jobs, me, questions
+from app.core.logging import setup_logging
 from app.llm.base import (
     LLMError,
     LLMInvalidOutput,
@@ -28,6 +29,7 @@ from app.llm.base import (
     LLMUnavailable,
 )
 from app.settings import get_settings
+from app.telemetry import init_telemetry
 
 
 @asynccontextmanager
@@ -39,6 +41,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app() -> FastAPI:
     """Fábrica de la aplicación FastAPI con rutas y manejadores configurados."""
     settings = get_settings()
+
+    # Inicialización de observabilidad
+    init_telemetry(service_name=settings.otel_service_name)
+    setup_logging()
 
     app = FastAPI(
         title="Pampero Claims Assistant API",
@@ -61,7 +67,18 @@ def create_app() -> FastAPI:
     async def trace_id_middleware(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        trace_id = request.headers.get("X-Trace-Id") or uuid.uuid4().hex
+        from opentelemetry import trace
+
+        incoming_trace_id = request.headers.get("X-Trace-Id")
+        if incoming_trace_id:
+            trace_id = incoming_trace_id
+        else:
+            ctx = trace.get_current_span().get_span_context()
+            if ctx.is_valid:
+                trace_id = f"{ctx.trace_id:032x}"
+            else:
+                trace_id = uuid.uuid4().hex
+
         request.state.trace_id = trace_id
         response: Response = await call_next(request)
         response.headers["X-Trace-Id"] = trace_id
@@ -88,6 +105,11 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router, prefix="/api/v1")
     app.include_router(chunks.router, prefix="/api/v1")
     app.include_router(questions.router, prefix="/api/v1")
+
+    # Instrumentación de FastAPI con OpenTelemetry
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+    FastAPIInstrumentor.instrument_app(app, excluded_urls="health.*|metrics")
 
     return app
 

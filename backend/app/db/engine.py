@@ -20,7 +20,7 @@ settings = get_settings()
 async_engine: AsyncEngine = create_async_engine(
     settings.database_url.get_secret_value(),
     pool_pre_ping=True,
-    echo=settings.debug,
+    echo=False,
 )
 
 async_session_maker: async_sessionmaker[AsyncSession] = async_sessionmaker(
@@ -34,7 +34,7 @@ async_session_maker: async_sessionmaker[AsyncSession] = async_sessionmaker(
 sync_engine = create_engine(
     settings.database_sync_url.get_secret_value(),
     pool_pre_ping=True,
-    echo=settings.debug,
+    echo=False,
 )
 
 sync_session_maker: sessionmaker[Session] = sessionmaker(
