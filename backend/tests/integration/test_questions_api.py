@@ -67,15 +67,12 @@ async def test_pregunta_respondible_con_citas_exito(
         "question": "¿Cuál es la franquicia aplicable para rotura de lunas?",
         "top_k": 5,
     }
-    custom_trace_id = "trace-test-12345"
-    res_q = await client.post(
-        "/api/v1/questions",
-        headers={**headers_a, "X-Trace-Id": custom_trace_id},
-        json=payload,
-    )
+    res_q = await client.post("/api/v1/questions", headers=headers_a, json=payload)
 
     assert res_q.status_code == 200
-    assert res_q.headers.get("X-Trace-Id") == custom_trace_id
+    # El id de traza lo genera OpenTelemetry y es el mismo en la cabecera, el cuerpo y el log
+    custom_trace_id = res_q.headers["X-Trace-Id"]
+    assert len(custom_trace_id) == 32
 
     data = res_q.json()
     assert data["status"] == "answered"

@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -57,6 +57,11 @@ class Settings(BaseSettings):
         description="Pepper para hashing HMAC-SHA256 de API keys de usuarios",
     )
 
+    # Red y abuso
+    cors_origins: list[str] = ["http://localhost:5173"]
+    rate_limit_questions_per_min: int = 30
+    rate_limit_uploads_per_min: int = 30
+
     # LLM y Embeddings
     llm_provider: Literal["fake", "litellm"] = "fake"
     llm_model: str = "gemini/gemini-2.5-flash"
@@ -84,6 +89,21 @@ class Settings(BaseSettings):
     # Puertos
     web_port: int = 5173
     api_port: int = 8000
+
+    @model_validator(mode="after")
+    def _sin_secretos_de_desarrollo_en_produccion(self) -> "Settings":
+        # Los valores por defecto existen para que `docker compose up` funcione sin configurar
+        # nada; fuera de desarrollo arrancar con ellos sería un fallo silencioso de seguridad.
+        if self.environment == "production":
+            inseguros = {
+                "ADMIN_TOKEN": self.admin_token.get_secret_value() == "pampero-dev-admin-token",
+                "API_KEY_PEPPER": self.api_key_pepper.get_secret_value()
+                == "pampero-default-pepper-secret",
+            }
+            faltan = [nombre for nombre, malo in inseguros.items() if malo]
+            if faltan:
+                raise ValueError(f"Secretos de desarrollo en producción: {', '.join(faltan)}")
+        return self
 
 
 @lru_cache

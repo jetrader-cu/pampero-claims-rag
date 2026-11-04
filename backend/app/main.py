@@ -31,6 +31,14 @@ from app.llm.base import (
 from app.settings import get_settings
 from app.telemetry import init_telemetry
 
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -56,10 +64,13 @@ def create_app() -> FastAPI:
     # Configuración de CORS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if settings.debug else [f"http://localhost:{settings.web_port}"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        # La auth va en una cabecera, no en cookies: no hacen falta credenciales CORS y la
+        # lista de orígenes es exacta (nunca "*").
+        allow_origins=settings.cors_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type", "X-Admin-Token", "traceparent"],
+        expose_headers=["X-Trace-Id", "Retry-After"],
     )
 
     # Middleware para inyectar X-Trace-Id en las peticiones y respuestas
@@ -69,16 +80,16 @@ def create_app() -> FastAPI:
     ) -> Response:
         from opentelemetry import trace
 
-        incoming_trace_id = request.headers.get("X-Trace-Id")
-        if incoming_trace_id:
-            trace_id = incoming_trace_id
-        else:
-            ctx = trace.get_current_span().get_span_context()
-            trace_id = f"{ctx.trace_id:032x}" if ctx.is_valid else uuid.uuid4().hex
+        # El id sale siempre del span activo de OpenTelemetry (el cliente puede propagar su
+        # contexto con `traceparent`). Aceptar un X-Trace-Id arbitrario del cliente devolvería
+        # un enlace a una traza que no existe.
+        ctx = trace.get_current_span().get_span_context()
+        trace_id = f"{ctx.trace_id:032x}" if ctx.is_valid else uuid.uuid4().hex
 
         request.state.trace_id = trace_id
         response: Response = await call_next(request)
         response.headers["X-Trace-Id"] = trace_id
+        response.headers.update(SECURITY_HEADERS)
         return response
 
     # Manejadores de excepciones en formato RFC 7807 (problem+json)

@@ -6,13 +6,21 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Principal, db_for_tenant, get_current_principal
+from app.api.ratelimit import rate_limit
 from app.api.schemas import AnswerResponse, QuestionIn
 from app.rag.service import AnswerService, get_answer_service
+from app.settings import get_settings
 
 router = APIRouter(prefix="/questions", tags=["questions"])
 
 
-@router.post("", response_model=AnswerResponse)
+@router.post(
+    "",
+    response_model=AnswerResponse,
+    dependencies=[
+        Depends(rate_limit("questions", lambda: get_settings().rate_limit_questions_per_min))
+    ],
+)
 async def ask_question(
     question_in: QuestionIn,
     request: Request,

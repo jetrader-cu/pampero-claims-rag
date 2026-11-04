@@ -10,10 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Principal, db_for_tenant, get_current_principal
 from app.api.errors import ProblemException
+from app.api.ratelimit import rate_limit
 from app.api.schemas import DocumentOut, UploadAccepted
 from app.db.models import Document, IngestionJob
 from app.ingest.storage import get_storage
 from app.ingest.validation import validate_upload_stream
+from app.settings import get_settings
 from app.worker.tasks import enqueue_ingestion_job
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -28,7 +30,13 @@ PERMANENT_ERROR_CODES = {
 }
 
 
-@router.post("", response_model=UploadAccepted)
+@router.post(
+    "",
+    response_model=UploadAccepted,
+    dependencies=[
+        Depends(rate_limit("uploads", lambda: get_settings().rate_limit_uploads_per_min))
+    ],
+)
 async def upload_document(
     response: Response,
     file: UploadFile = File(...),

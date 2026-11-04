@@ -26,8 +26,9 @@ class ProblemException(HTTPException):
         detail: str,
         problem_type: str = "about:blank",
         extra: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
-        super().__init__(status_code=status_code, detail=detail)
+        super().__init__(status_code=status_code, detail=detail, headers=headers)
         self.code = code
         self.title = title
         self.problem_type = problem_type
@@ -75,6 +76,7 @@ async def problem_exception_handler(request: Request, exc: ProblemException) -> 
         problem_type=exc.problem_type,
         trace_id=trace_id,
         extra=exc.extra,
+        headers=dict(exc.headers) if exc.headers else None,
     )
 
 
