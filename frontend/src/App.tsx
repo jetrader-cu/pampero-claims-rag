@@ -1,15 +1,28 @@
-import React from "react";
+import React, { useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { SessionProvider } from "./context/SessionContext";
+import { AppShell } from "./components/layout/AppShell";
 
 export function App(): React.JSX.Element {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            retry: 1,
+            staleTime: 5000,
+            refetchOnWindowFocus: false,
+          },
+        },
+      }),
+  );
+
   return (
-    <main className="min-h-screen p-8 flex flex-col items-center justify-center">
-      <h1 className="text-3xl font-bold tracking-tight mb-2">
-        Pampero Claims Assistant
-      </h1>
-      <p className="text-muted-foreground text-sm">
-        Asistente RAG multi-tenant para reclamaciones de seguros de vehículos.
-      </p>
-    </main>
+    <QueryClientProvider client={queryClient}>
+      <SessionProvider>
+        <AppShell />
+      </SessionProvider>
+    </QueryClientProvider>
   );
 }
 
