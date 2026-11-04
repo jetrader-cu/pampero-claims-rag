@@ -74,10 +74,7 @@ def create_app() -> FastAPI:
             trace_id = incoming_trace_id
         else:
             ctx = trace.get_current_span().get_span_context()
-            if ctx.is_valid:
-                trace_id = f"{ctx.trace_id:032x}"
-            else:
-                trace_id = uuid.uuid4().hex
+            trace_id = f"{ctx.trace_id:032x}" if ctx.is_valid else uuid.uuid4().hex
 
         request.state.trace_id = trace_id
         response: Response = await call_next(request)
