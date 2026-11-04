@@ -53,3 +53,4 @@ export const TraceLink: React.FC<TraceLinkProps> = ({ traceId }) => {
     </div>
   );
 };
+

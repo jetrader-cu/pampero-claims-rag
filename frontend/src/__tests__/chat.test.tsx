@@ -111,3 +111,4 @@ describe("Componentes de Chat y Citas RAG", () => {
     expect(onRetry).toHaveBeenCalled();
   });
 });
+

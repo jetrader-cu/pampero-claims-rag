@@ -135,3 +135,4 @@ export function getJaegerTraceUrl(traceId: string): string {
     "http://localhost:3000/explore?left=%7B%22queries%22:%5B%7B%22query%22:%22{traceId}%22%7D%5D%7D";
   return template.replace("{traceId}", traceId);
 }
+
