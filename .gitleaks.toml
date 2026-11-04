@@ -1,0 +1,15 @@
+# Reglas por defecto de gitleaks + excepciones para los valores de DESARROLLO del repositorio.
+# Son credenciales de demo, públicas a propósito (README); en producción se rechazan al arrancar.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Valores de demo locales"
+regexes = [
+  '''pampero_key_demo_(norte|sur)''',
+  '''pampero-dev-admin-token''',
+  '''pampero_app_secret''',
+  '''pampero-default-pepper-secret''',
+  '''pampero-insecure-dev-secret-key-change-me''',
+  '''dev-secret-key-change-in-production''',
+]

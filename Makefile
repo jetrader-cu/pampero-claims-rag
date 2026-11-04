@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help up down restart logs ps test test-backend test-frontend lint lint-backend lint-frontend eval seed clean
+.PHONY: help up down restart logs ps test test-backend test-frontend lint lint-backend lint-frontend eval seed clean reset
 
 help:
 	@echo "Pampero Claims Assistant — Comandos disponibles:"
@@ -16,7 +16,7 @@ help:
 	@echo "  make clean          Limpia artefactos temporales y cachés"
 
 up:
-	docker compose up -d --wait
+	docker compose up -d --build --wait
 
 down:
 	docker compose down
@@ -55,11 +55,18 @@ test-frontend:
 
 test: test-backend test-frontend
 
+# Datos de ejemplo: se ejecutan dentro del worker (mismo parser con OCR y misma base de datos)
+TOOLS = docker compose run --rm -e PYTHONPATH=/app -e OTEL_EXPORT_ENABLED=false \
+	-v ./scripts:/app/scripts:ro -v ./samples:/app/samples:ro -v ./eval:/app/eval:ro worker
+
 seed:
-	cd backend && uv run python ../scripts/seed.py
+	$(TOOLS) python scripts/seed.py
 
 eval:
-	cd backend && uv run python ../scripts/eval.py $(ARGS)
+	$(TOOLS) python scripts/eval.py --inprocess $(ARGS)
+
+reset:
+	docker compose down -v
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +

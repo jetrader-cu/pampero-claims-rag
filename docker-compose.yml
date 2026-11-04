@@ -1,3 +1,24 @@
+# Un solo comando: `make up` (docker compose up -d --build --wait).
+# Sin .env funciona con los proveedores falsos; con .env se usan sus valores (LLM real, etc.).
+
+x-backend-env: &backend-env
+  DATABASE_URL: "postgresql+asyncpg://pampero_app:pampero_app_secret@db:5432/pampero"
+  DATABASE_SYNC_URL: "postgresql+psycopg://pampero_app:pampero_app_secret@db:5432/pampero"
+  REDIS_URL: "redis://redis:6379/0"
+  CELERY_BROKER_URL: "redis://redis:6379/0"
+  STORAGE_PATH: "/app/data/uploads"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-lgtm:4317"
+  ADMIN_TOKEN: ${ADMIN_TOKEN:-pampero-dev-admin-token}
+  API_KEY_PEPPER: ${API_KEY_PEPPER:-pampero-default-pepper-secret}
+  LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+  LLM_MODEL: ${LLM_MODEL:-gemini/gemini-2.5-flash}
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-fake}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini/gemini-embedding-001}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  RAG_MIN_SIMILARITY: ${RAG_MIN_SIMILARITY:-0.20}
+  CORS_ORIGINS: '["http://localhost:${WEB_PORT:-5173}"]'
+
 services:
   db:
     image: pgvector/pgvector:0.8.7-pg17-trixie
@@ -11,7 +32,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/00_init.sql:ro
     ports:
-      - "${POSTGRES_PORT:-54329}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-54329}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-pampero}"]
       interval: 5s
@@ -26,7 +47,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "${REDIS_PORT:-63799}:6379"
+      - "127.0.0.1:${REDIS_PORT:-63799}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -60,44 +81,35 @@ services:
   migrate:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      target: api
+    image: pampero-api:local
     container_name: pampero-migrate
     command: ["alembic", "upgrade", "head"]
     restart: "no"
     environment:
       DATABASE_URL_OWNER: "postgresql+psycopg://postgres:postgres@db:5432/pampero"
-      DATABASE_SYNC_URL: "postgresql+psycopg://postgres:postgres@db:5432/pampero"
     depends_on:
       db:
         condition: service_healthy
 
   api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: pampero-api:local
     container_name: pampero-api
     restart: unless-stopped
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
-      DATABASE_URL: "postgresql+asyncpg://pampero_app:pampero_app_secret@db:5432/pampero"
-      DATABASE_SYNC_URL: "postgresql+psycopg://pampero_app:pampero_app_secret@db:5432/pampero"
-      REDIS_URL: "redis://redis:6379/0"
-      CELERY_BROKER_URL: "redis://redis:6379/0"
-      STORAGE_PATH: "/app/data/uploads"
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-pampero-dev-admin-token}
-      API_KEY_PEPPER: ${API_KEY_PEPPER:-pampero-default-pepper-secret}
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-lgtm:4317"
+      <<: *backend-env
+      OTEL_SERVICE_NAME: pampero-api
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
-      - ./backend/data/uploads:/app/data/uploads
+      - pampero_storage:/app/data/uploads
     depends_on:
       migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -106,21 +118,16 @@ services:
   worker:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      target: worker
+    image: pampero-worker:local
     container_name: pampero-worker
     restart: unless-stopped
-    command: ["celery", "-A", "app.worker.celery_app", "worker", "-l", "INFO", "-c", "2", "-Q", "celery"]
     environment:
-      DATABASE_URL: "postgresql+asyncpg://pampero_app:pampero_app_secret@db:5432/pampero"
-      DATABASE_SYNC_URL: "postgresql+psycopg://pampero_app:pampero_app_secret@db:5432/pampero"
-      REDIS_URL: "redis://redis:6379/0"
-      CELERY_BROKER_URL: "redis://redis:6379/0"
-      STORAGE_PATH: "/app/data/uploads"
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-pampero-dev-admin-token}
-      API_KEY_PEPPER: ${API_KEY_PEPPER:-pampero-default-pepper-secret}
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-lgtm:4317"
+      <<: *backend-env
+      OTEL_SERVICE_NAME: pampero-worker
+      PARSER: ${PARSER:-docling}
     volumes:
-      - ./backend/data/uploads:/app/data/uploads
+      - pampero_storage:/app/data/uploads
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -128,26 +135,29 @@ services:
         condition: service_healthy
 
   beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: pampero-api:local
     container_name: pampero-beat
     restart: unless-stopped
-    command: ["celery", "-A", "app.worker.celery_app", "beat", "-l", "INFO"]
+    command: ["celery", "-A", "app.worker.celery_app", "beat", "-l", "INFO", "-s", "/tmp/celerybeat-schedule"]
     environment:
-      CELERY_BROKER_URL: "redis://redis:6379/0"
+      <<: *backend-env
+      OTEL_SERVICE_NAME: pampero-beat
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 
   web:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      args:
+        VITE_TRACE_URL_TEMPLATE: ${VITE_TRACE_URL_TEMPLATE:-}
+    image: pampero-web:local
     container_name: pampero-web
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-5173}:80"
+      - "${WEB_PORT:-5173}:80"
     depends_on:
       api:
         condition: service_healthy
