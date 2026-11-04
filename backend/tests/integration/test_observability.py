@@ -88,6 +88,14 @@ async def test_spans_propios_de_ingesta_y_rag(
     assert "rag.candidates" in ret_span.attributes  # type: ignore[operator]
     assert "rag.top_similarity" in ret_span.attributes  # type: ignore[operator]
 
+    # Las consultas SQL forman parte de la misma traza (engines instrumentados explícitamente)
+    db_spans = [s for s in spans if (s.attributes or {}).get("db.system") == "postgresql"]
+    assert db_spans, "no hay spans de base de datos en la traza"
+    persist_span = next(s for s in spans if s.name == "ingest.persist")
+    assert any(d.context.trace_id == persist_span.context.trace_id for d in db_spans), (
+        "los INSERT de chunks no cuelgan de la traza de ingesta"
+    )
+
 
 @pytest.mark.asyncio
 async def test_trazas_y_logs_no_contienen_texto_canario(

@@ -2,6 +2,9 @@
 
 import os
 import uuid
+
+# Los tests generan spans en memoria; nunca intentan exportar a un colector inexistente.
+os.environ.setdefault("OTEL_EXPORT_ENABLED", "false")
 from collections.abc import AsyncGenerator
 from typing import Any
 

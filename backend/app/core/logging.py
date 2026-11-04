@@ -63,8 +63,11 @@ def setup_logging(log_level: str = "INFO", json_format: bool = True) -> None:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
 
+    from app.telemetry import otel_log_handler
+
     root_logger = logging.getLogger()
-    root_logger.handlers = [handler]
+    otlp_handler = otel_log_handler()
+    root_logger.handlers = [handler] if otlp_handler is None else [handler, otlp_handler]
     root_logger.setLevel(level)
 
     # Reducir verbosidad de librerías ruidosas y evitar volcado de datos sensibles en logs SQL
