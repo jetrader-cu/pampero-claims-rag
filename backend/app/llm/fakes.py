@@ -177,29 +177,162 @@ class FakeLLMClient:
 
             # Buscar pregunta al final del prompt
             q_match = re.search(r"Pregunta del perito/asegurado:\s*(.*?)(?:\n|$)", user)
-            question_text = q_match.group(1).lower() if q_match else ""
-            q_words = set(re.findall(r"\w{4,}", question_text))
+            raw_q = q_match.group(1) if q_match else ""
 
+            # Neutralizar directivas de inyección en la pregunta
+            clean_q = re.sub(r"\[.*?\]", " ", raw_q)
+            clean_q = re.sub(
+                r"(ignora|olvida|responde únicamente|responde exactamente|directiva).*?(?=[?¿]|$)",
+                " ",
+                clean_q,
+                flags=re.I,
+            )
+
+            stopwords = {
+                "que",
+                "qué",
+                "del",
+                "por",
+                "con",
+                "sin",
+                "para",
+                "como",
+                "esta",
+                "este",
+                "estos",
+                "estas",
+                "una",
+                "uno",
+                "unos",
+                "unas",
+                "los",
+                "las",
+                "les",
+                "sus",
+                "segun",
+                "según",
+                "sobre",
+                "tiene",
+                "todos",
+                "todas",
+                "donde",
+                "dónde",
+                "cuando",
+                "cuándo",
+                "desde",
+                "hasta",
+                "hacia",
+                "tras",
+                "cada",
+                "pero",
+                "entre",
+                "cual",
+                "cuál",
+                "cuanto",
+                "cuánto",
+                "cuantos",
+                "cuántos",
+                "cuanta",
+                "cuantas",
+                "poliza",
+                "póliza",
+                "seguro",
+                "seguros",
+                "pampero",
+                "parte",
+                "partes",
+                "norte",
+                "sur",
+                "aseguradora",
+                "asegurado",
+                "asegurada",
+                "vehiculo",
+                "vehículo",
+                "documento",
+                "documentos",
+                "caso",
+                "siniestro",
+                "emitido",
+                "emitida",
+                "taller",
+                "talleres",
+                "aplica",
+                "aplicable",
+                "cubre",
+                "ap-2024-0012",
+                "ap-2024-0088",
+                "sin-2024-9901",
+                "fac-2024-104",
+                "fac-2024-550",
+            }
+            q_tokens = re.findall(r"[a-záéíóúüñ0-9\-]{3,}", clean_q.lower())
+            discriminant_q_words = {w for w in q_tokens if w not in stopwords}
+            # Raíces/stems de las palabras discriminantes (primeras 5 letras)
+            q_stems = {w[:5] for w in discriminant_q_words if len(w) >= 3}
+
+            # 1. Comprobación de fidelidad/evidencia: si más del 30% de los conceptos clave
+            # de la pregunta están totalmente ausentes en TODO el contexto recuperado, abstenerse.
+            all_context_tokens = set(re.findall(r"[a-záéíóúüñ0-9\-]{3,}", user.lower()))
+            all_context_stems = {w[:5] for w in all_context_tokens}
+            missing_stems = [s for s in q_stems if s not in all_context_stems]
+            missing_ratio = len(missing_stems) / len(q_stems) if q_stems else 0.0
+
+            if missing_ratio > 0.30:
+                answer_obj = LLMAnswer(
+                    answerable=False,
+                    answer="No encontré evidencia suficiente en los documentos para responder.",
+                    citations=[],
+                )
+                return LLMResult(
+                    value=schema.model_validate(answer_obj.model_dump()),
+                    model=self.model_name,
+                    input_tokens=200,
+                    output_tokens=45,
+                    latency_ms=40,
+                )
+
+            # 2. Selección del mejor fragmento y cita
             best_chunk_id: str | None = None
             best_quote: str | None = None
-            max_overlap = 0
+            max_score = 0.0
 
-            for chunk_id, _doc_name, _page_no, chunk_text in matches:
-                # Partir en oraciones
-                sentences = re.split(r"(?<=[.!?])\s+", chunk_text.strip())
-                for s in sentences:
-                    s_clean = s.strip()
-                    if len(s_clean) < 10 or len(s_clean) > 300:
-                        continue
-                    s_words = set(re.findall(r"\w{4,}", s_clean.lower()))
-                    overlap = len(q_words & s_words)
-                    if overlap > max_overlap:
-                        max_overlap = overlap
-                        best_chunk_id = chunk_id
-                        best_quote = s_clean
+            for chunk_id, doc_name, _page_no, chunk_text in matches:
+                candidatos: list[str] = [
+                    s.strip()
+                    for s in re.split(r"(?:[\r\n]+|\||(?<=[.!?])\s+)", chunk_text)
+                    if 10 <= len(s.strip()) <= 280
+                ]
 
-            # Si hay una coincidencia con solape sustantivo, responder con cita
-            if best_chunk_id and best_quote and max_overlap >= 1:
+                # Para bloques tabulares sin puntuación, extraer ventanas sobre términos clave
+                palabras_chunk = chunk_text.split()
+                for i, w in enumerate(palabras_chunk):
+                    w_clean = re.sub(r"[^\w]", "", w.lower())
+                    if len(w_clean) >= 3 and w_clean[:5] in q_stems:
+                        start_idx = max(0, i - 8)
+                        end_idx = min(len(palabras_chunk), i + 16)
+                        span = " ".join(palabras_chunk[start_idx:end_idx]).strip()
+                        if 15 <= len(span) <= 280:
+                            candidatos.append(span)
+
+                doc_lower = doc_name.lower()
+                doc_bonus = 3.0 if any(w[:5] in doc_lower for w in discriminant_q_words) else 0.0
+
+                for cand in candidatos:
+                    cand_tokens = set(re.findall(r"[a-záéíóúüñ0-9\-]{3,}", cand.lower()))
+                    cand_stems = {w[:5] for w in cand_tokens}
+
+                    overlap = len(q_stems & cand_stems)
+                    ratio = overlap / len(q_stems) if q_stems else 0.0
+
+                    if overlap >= 2:
+                        score = (overlap * 3.0) + (ratio * 4.0) + doc_bonus
+                        if score > max_score:
+                            max_score = score
+                            best_chunk_id = chunk_id
+                            best_quote = cand
+
+            # Si se supera el umbral de evidencia sustantiva, responder afirmativamente con la cita
+            if best_chunk_id and best_quote and max_score >= 5.0:
                 answer_obj = LLMAnswer(
                     answerable=True,
                     answer=f"Conforme a la documentación [1], {best_quote}",
@@ -208,7 +341,7 @@ class FakeLLMClient:
             else:
                 answer_obj = LLMAnswer(
                     answerable=False,
-                    answer="No se encontró evidencia concluyente en las pólizas analizadas.",
+                    answer="No encontré evidencia suficiente en los documentos para responder.",
                     citations=[],
                 )
 

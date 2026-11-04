@@ -69,11 +69,10 @@ jobs:
       - name: Pruebas unitarias y de integración
         run: uv run pytest -m "not docling"
 
-      - name: Evaluación de RAG (si aplica)
+      - name: Evaluación de RAG
         run: |
-          if [ -f "../scripts/eval.py" ]; then
-            uv run python ../scripts/eval.py --inprocess --assert
-          fi
+          uv run python ../scripts/seed.py
+          uv run python ../scripts/eval.py --inprocess --assert
 
       - name: Auditoría de vulnerabilidades con pip-audit
         run: uv run pip-audit
