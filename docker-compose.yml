@@ -93,6 +93,9 @@ services:
         condition: service_healthy
 
   api:
+    build:
+      context: ./backend
+      target: api
     image: pampero-api:local
     container_name: pampero-api
     restart: unless-stopped
@@ -102,7 +105,7 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
-      - pampero_storage:/app/data/uploads
+      - ./backend/data/uploads:/app/data/uploads
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -127,7 +130,7 @@ services:
       OTEL_SERVICE_NAME: pampero-worker
       PARSER: ${PARSER:-docling}
     volumes:
-      - pampero_storage:/app/data/uploads
+      - ./backend/data/uploads:/app/data/uploads
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -135,6 +138,9 @@ services:
         condition: service_healthy
 
   beat:
+    build:
+      context: ./backend
+      target: api
     image: pampero-api:local
     container_name: pampero-beat
     restart: unless-stopped

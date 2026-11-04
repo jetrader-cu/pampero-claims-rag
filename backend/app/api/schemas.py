@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TenantBase(BaseModel):
@@ -32,7 +32,13 @@ class TenantOut(TenantBase):
 class UserBase(BaseModel):
     """Atributos base para un usuario."""
 
-    email: EmailStr
+    email: str = Field(
+        ...,
+        min_length=3,
+        max_length=255,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+        description="Correo electrónico del usuario",
+    )
 
 
 class UserCreate(UserBase):

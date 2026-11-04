@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1.7
 FROM node:22-alpine AS builder
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@10.28.0 --activate
+RUN npm install -g pnpm@10.28.0 && \
+    pnpm config set fetch-retries 5 && \
+    pnpm config set fetch-timeout 300000 && \
+    pnpm config set network-concurrency 2
 COPY package.json pnpm-lock.yaml ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
