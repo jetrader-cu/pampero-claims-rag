@@ -17,5 +17,8 @@ RUN pnpm exec tsc -b && pnpm exec vite build
 FROM nginx:1.29-alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+RUN mkdir -p /usr/share/nginx/html/assets/pdfjs-dist/build && \
+    cp /usr/share/nginx/html/assets/pdf.worker.min-*.mjs /usr/share/nginx/html/assets/pdfjs-dist/build/pdf.worker.min.mjs && \
+    cp /usr/share/nginx/html/assets/pdf.worker.min-*.mjs /usr/share/nginx/html/pdf.worker.min.mjs
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
