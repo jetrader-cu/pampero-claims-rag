@@ -47,6 +47,9 @@ services:
       - "3000:3000"     # Grafana UI
       - "4317:4317"     # OTLP gRPC
       - "4318:4318"     # OTLP HTTP
+    volumes:
+      - ./docker/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
       interval: 10s
