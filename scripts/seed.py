@@ -36,6 +36,7 @@ async def sembrar_tenant(
     email_usuario: str,
     api_key: str,
     carpeta_samples: Path,
+    extras: list[Path] | None = None,
 ) -> tuple[Tenant, User, list[str]]:
     """Crea o recupera un tenant, su usuario y procesa sus documentos."""
     storage = get_storage()
@@ -78,7 +79,7 @@ async def sembrar_tenant(
             print(f" [i] Usuario existente: {email_usuario}")
 
         # 3. Procesar documentos de muestra
-        archivos = sorted(list(carpeta_samples.glob("*.pdf")))
+        archivos = sorted(carpeta_samples.glob("*.pdf")) + list(extras or [])
         if not archivos:
             print(f" [!] Alerta: no se encontraron PDFs en {carpeta_samples}")
 
@@ -108,33 +109,40 @@ async def sembrar_tenant(
                 docs_procesados.append(f"{pdf_path.name} (existente, {doc_existente.chunk_count} chunks)")
                 continue
 
-            doc_id = uuid.uuid4()
             job_id = uuid.uuid4()
-            storage_key = await storage.save(tenant_id, doc_id, content)
-
-            # Asegurar contexto RLS antes de insertar
-            await set_tenant_context(session, tenant_id)
-
-            doc = Document(
-                id=doc_id,
-                tenant_id=tenant_id,
-                uploaded_by=user.id,
-                filename=pdf_path.name,
-                size_bytes=len(content),
-                page_count=page_count,
-                sha256=sha256,
-                storage_key=storage_key,
-                status="queued",
+            if doc_existente is not None:
+                # Re-ejecutar el seed reprocesa lo que falló (p. ej. un escaneado sin OCR)
+                # en vez de chocar con UNIQUE(tenant_id, sha256).
+                doc_id = doc_existente.id
+                doc_existente.status = "queued"
+                doc_existente.error_code = None
+                doc_existente.error_detail = None
+            else:
+                doc_id = uuid.uuid4()
+                storage_key = await storage.save(tenant_id, doc_id, content)
+                session.add(
+                    Document(
+                        id=doc_id,
+                        tenant_id=tenant_id,
+                        uploaded_by=user.id,
+                        filename=pdf_path.name,
+                        size_bytes=len(content),
+                        page_count=page_count,
+                        sha256=sha256,
+                        storage_key=storage_key,
+                        status="queued",
+                    )
+                )
+                await session.flush()
+            session.add(
+                IngestionJob(
+                    id=job_id,
+                    tenant_id=tenant_id,
+                    document_id=doc_id,
+                    status="queued",
+                    max_attempts=5,
+                )
             )
-            job = IngestionJob(
-                id=job_id,
-                tenant_id=tenant_id,
-                document_id=doc_id,
-                status="queued",
-                max_attempts=5,
-            )
-            session.add(doc)
-            session.add(job)
             await session.commit()
 
             print(f" [>] Ingestando {pdf_path.name}...")
@@ -179,6 +187,9 @@ async def main_async() -> None:
         email_usuario="ajustador-norte@pampero.local",
         api_key=API_KEY_NORTE,
         carpeta_samples=norte_samples,
+        # Documento con instrucciones incrustadas: comprueba la defensa contra inyección
+        # indirecta (la que llega dentro de un PDF, no en la pregunta).
+        extras=[samples_dir / "comun" / "documento_inyeccion.pdf"],
     )
 
     # 3. Sembrar Tenant Sur

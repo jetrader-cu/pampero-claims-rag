@@ -161,7 +161,7 @@ async def ejecutar_evaluacion(
             citations = result.get("citations", [])
             confidence = result.get("confidence", "none")
 
-            if status == "insufficient_evidence":
+            if status == "insufficient_evidence" and q_type in ("answerable", "unanswerable"):
                 tot_abstained += 1
 
             if q_type == "answerable":

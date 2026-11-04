@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from typing import Literal
 
 from app.api.schemas import Citation, LLMCitation
+from app.rag.prompts import looks_like_injection
 from app.rag.retrieval import RetrievalHit
 
 ConfidenceLevel = Literal["high", "medium", "low", "none"]
@@ -20,7 +21,11 @@ def decide_confidence(
     if not valid_citations:
         return "none"
 
-    # Si el modelo alucinó citas que tuvieron que descartarse, penalizar a 'low'
+    # Si el modelo alucinó citas, o se apoya en un fragmento con instrucciones incrustadas,
+    # la respuesta no merece más que 'low' aunque las citas sean literales.
+    cited = {c.chunk_id for c in valid_citations}
+    if any(h.id in cited and looks_like_injection(h.text) for h in hits):
+        return "low"
     if dropped_citations:
         return "low"
 
