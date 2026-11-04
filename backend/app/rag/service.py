@@ -1,6 +1,7 @@
 """Servicio orquestador del ciclo completo de recuperación, inferencia y validación RAG."""
 
 import logging
+import time
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,11 +10,13 @@ from app.api.schemas import AnswerResponse, QuestionIn, Usage
 from app.db.models import QuestionLog
 from app.llm.base import LLMClient
 from app.llm.factory import get_embedding_client, get_llm_client
+from app.metrics import llm_request_duration_seconds, llm_tokens_total, rag_questions_total
 from app.rag.citations import renumber_citations_in_text, validate_citations
 from app.rag.confidence import decide_confidence
 from app.rag.prompts import SYSTEM_PROMPT, generate_nonce, render_context
 from app.rag.retrieval import HybridRetriever
 from app.settings import get_settings
+from app.telemetry import get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -39,28 +42,40 @@ class AnswerService:
     ) -> AnswerResponse:
         """Procesa una consulta garantizando aislamiento RLS, evidencia estricta y citas."""
         settings = get_settings()
+        tracer = get_tracer("pampero.rag")
 
         # 1. Vectorización de la pregunta
-        q_vectors = await self.embedder.aembed([q.question])
-        q_vec = q_vectors[0]
+        with tracer.start_as_current_span("gen_ai.embeddings") as emb_span:
+            emb_span.set_attribute(
+                "gen_ai.system", "litellm" if settings.embedding_provider == "litellm" else "fake"
+            )
+            emb_span.set_attribute("embedding.dim", settings.embedding_dim)
+            q_vectors = await self.embedder.aembed([q.question])
+            q_vec = q_vectors[0]
 
         # 2. Recuperación híbrida (HNSW + Texto unaccent con RRF)
-        hits = await self.retriever.search(
-            session=session,
-            tenant_id=principal.tenant_id,
-            query_text=q.question,
-            query_vector=q_vec,
-            top_k=q.top_k,
-            document_ids=q.document_ids,
-        )
+        with tracer.start_as_current_span("retrieval.hybrid") as ret_span:
+            ret_span.set_attribute("app.tenant_id", str(principal.tenant_id))
+            hits = await self.retriever.search(
+                session=session,
+                tenant_id=principal.tenant_id,
+                query_text=q.question,
+                query_vector=q_vec,
+                top_k=q.top_k,
+                document_ids=q.document_ids,
+            )
+            max_sim = max((h.sim for h in hits), default=0.0)
+            max_kw = max((h.kw_rank for h in hits), default=0.0)
+            ret_span.set_attribute("rag.candidates", len(hits))
+            ret_span.set_attribute("rag.top_similarity", max_sim)
+            ret_span.set_attribute("rag.top_kw_rank", max_kw)
 
-        max_sim = max((h.sim for h in hits), default=0.0)
-        max_kw = max((h.kw_rank for h in hits), default=0.0)
         min_sim = settings.rag_min_similarity
 
         # PUERTA 1: Puerta de recuperación previa
         if not hits or (max_sim < min_sim and max_kw == 0.0):
             logger.info("Consulta rechazada por Puerta 1 (sin candidatos o baja similitud)")
+            rag_questions_total.add(1, {"status": "insufficient_evidence"})
             log_record = QuestionLog(
                 tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
@@ -89,11 +104,26 @@ class AnswerService:
         # 4. Inferencia estructurada
         from app.api.schemas import LLMAnswer
 
-        result = await self.llm.chat_structured(
-            system=SYSTEM_PROMPT,
-            user=user_prompt,
-            schema=LLMAnswer,
-        )
+        t_llm0 = time.perf_counter()
+        with tracer.start_as_current_span("gen_ai.chat") as chat_span:
+            chat_span.set_attribute(
+                "gen_ai.system", "litellm" if settings.llm_provider == "litellm" else "fake"
+            )
+            chat_span.set_attribute("gen_ai.request.model", settings.llm_model)
+
+            result = await self.llm.chat_structured(
+                system=SYSTEM_PROMPT,
+                user=user_prompt,
+                schema=LLMAnswer,
+            )
+
+            chat_span.set_attribute("gen_ai.usage.input_tokens", result.input_tokens)
+            chat_span.set_attribute("gen_ai.usage.output_tokens", result.output_tokens)
+            llm_request_duration_seconds.record(
+                time.perf_counter() - t_llm0, {"model": result.model, "outcome": "success"}
+            )
+            llm_tokens_total.add(result.input_tokens, {"model": result.model, "kind": "input"})
+            llm_tokens_total.add(result.output_tokens, {"model": result.model, "kind": "output"})
 
         usage = Usage(
             input_tokens=result.input_tokens,
@@ -104,6 +134,7 @@ class AnswerService:
         # PUERTA 2: Decisión del modelo de abstenerse
         if not result.value.answerable:
             logger.info("Consulta rechazada por Puerta 2 (el modelo indicó answerable=False)")
+            rag_questions_total.add(1, {"status": "insufficient_evidence"})
             log_record = QuestionLog(
                 tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
@@ -135,6 +166,7 @@ class AnswerService:
 
         if not valid_citations:
             logger.info("Consulta rechazada por Puerta 3 (sin citas textuales verificables)")
+            rag_questions_total.add(1, {"status": "insufficient_evidence"})
             log_record = QuestionLog(
                 tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
@@ -171,6 +203,7 @@ class AnswerService:
             high_sim=settings.rag_high_similarity,
         )
 
+        rag_questions_total.add(1, {"status": "answered"})
         log_record = QuestionLog(
             tenant_id=principal.tenant_id,
             user_id=principal.user_id,

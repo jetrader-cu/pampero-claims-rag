@@ -34,4 +34,3 @@ async def get_chunk(
         )
 
     return ChunkOut.model_validate(chunk)
-

@@ -68,4 +68,3 @@ async def test_seguridad_inyeccion_indirecta_prompt(
     # Las citas válidas deben apuntar a la cláusula real
     assert len(data["citations"]) >= 1
     assert any("300 euros" in c["quote"] for c in data["citations"])
-

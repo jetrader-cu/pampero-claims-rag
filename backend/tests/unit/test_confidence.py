@@ -59,4 +59,3 @@ def test_confianza_media_con_una_cita() -> None:
     citas = [_citation(1)]
     hits = [_hit(0.45)]
     assert decide_confidence(hits, citas, []) == "medium"
-

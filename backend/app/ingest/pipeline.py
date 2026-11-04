@@ -1,6 +1,7 @@
 """Pipeline transaccional de ingesta de documentos y mantenimiento de jobs."""
 
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -14,7 +15,13 @@ from app.ingest.errors import PermanentIngestError, TransientIngestError
 from app.ingest.parsing import get_parser
 from app.ingest.storage import get_storage
 from app.llm.factory import get_embedding_client
+from app.metrics import (
+    ingest_task_duration_seconds,
+    ingest_task_failures_total,
+    ingest_task_retries_total,
+)
 from app.settings import get_settings
+from app.telemetry import get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +84,30 @@ def run_ingestion(job_id: uuid.UUID) -> None:
         max_attempts = job.max_attempts
 
     # 3. Pipeline de procesamiento
+    tracer = get_tracer("pampero.ingest")
+    if attempt > 1:
+        ingest_task_retries_total.add(1)
+
     try:
         # a) Parsing
-        storage = get_storage()
-        file_path = storage.get_local_path(storage_key)
-        parser = get_parser()
-        parsed_doc = parser.parse(file_path)
+        t0 = time.perf_counter()
+        with tracer.start_as_current_span("ingest.parse") as span:
+            span.set_attribute("app.tenant_id", str(tenant_id))
+            span.set_attribute("app.document_id", str(doc_id))
+            span.set_attribute("app.job_id", str(job_id))
+            span.set_attribute("app.attempt", attempt)
+
+            storage = get_storage()
+            file_path = storage.get_local_path(storage_key)
+            parser = get_parser()
+            parsed_doc = parser.parse(file_path)
+
+            span.set_attribute("ingest.pages", parsed_doc.page_count)
+            span.set_attribute("ingest.ocr_used", parsed_doc.ocr_used)
+
+        ingest_task_duration_seconds.record(
+            time.perf_counter() - t0, {"stage": "parse", "outcome": "success"}
+        )
 
         with sync_session_maker() as session:
             set_sync_tenant_context(session, tenant_id)
@@ -92,12 +117,22 @@ def run_ingestion(job_id: uuid.UUID) -> None:
                 session.commit()
 
         # b) Chunking
-        chunks_data = chunk_document(parsed_doc, filename=doc_filename)
-        if not chunks_data:
-            raise PermanentIngestError(
-                message="El archivo PDF no contiene fragmentos de texto procesables",
-                code="empty_document",
-            )
+        t0 = time.perf_counter()
+        with tracer.start_as_current_span("ingest.chunk") as span:
+            span.set_attribute("app.tenant_id", str(tenant_id))
+            span.set_attribute("app.document_id", str(doc_id))
+
+            chunks_data = chunk_document(parsed_doc, filename=doc_filename)
+            if not chunks_data:
+                raise PermanentIngestError(
+                    message="El archivo PDF no contiene fragmentos de texto procesables",
+                    code="empty_document",
+                )
+            span.set_attribute("ingest.chunks", len(chunks_data))
+
+        ingest_task_duration_seconds.record(
+            time.perf_counter() - t0, {"stage": "chunk", "outcome": "success"}
+        )
 
         with sync_session_maker() as session:
             set_sync_tenant_context(session, tenant_id)
@@ -107,9 +142,19 @@ def run_ingestion(job_id: uuid.UUID) -> None:
                 session.commit()
 
         # c) Embedding
-        texts = [c.text for c in chunks_data]
-        emb_client = get_embedding_client()
-        embeddings = emb_client.embed(texts)
+        t0 = time.perf_counter()
+        with tracer.start_as_current_span("ingest.embed") as span:
+            span.set_attribute("embedding.model", settings.embedding_model)
+            span.set_attribute("embedding.dim", settings.embedding_dim)
+            span.set_attribute("ingest.chunks", len(chunks_data))
+
+            texts = [c.text for c in chunks_data]
+            emb_client = get_embedding_client()
+            embeddings = emb_client.embed(texts)
+
+        ingest_task_duration_seconds.record(
+            time.perf_counter() - t0, {"stage": "embed", "outcome": "success"}
+        )
 
         with sync_session_maker() as session:
             set_sync_tenant_context(session, tenant_id)
@@ -119,61 +164,71 @@ def run_ingestion(job_id: uuid.UUID) -> None:
                 session.commit()
 
         # d) Persistencia atómica
-        with sync_session_maker() as session:
-            set_sync_tenant_context(session, tenant_id)
+        t0 = time.perf_counter()
+        with tracer.start_as_current_span("ingest.persist") as span:
+            span.set_attribute("db.table", "chunks")
+            span.set_attribute("ingest.chunks", len(chunks_data))
 
-            # Limpiar chunks previos si era reprocesamiento
-            del_stmt = text("DELETE FROM chunks WHERE document_id = :doc_id")
-            session.execute(del_stmt, {"doc_id": str(doc_id)})
+            with sync_session_maker() as session:
+                set_sync_tenant_context(session, tenant_id)
 
-            # Insertar los nuevos chunks
-            for c_data, emb in zip(chunks_data, embeddings, strict=True):
-                h_path = " › ".join(c_data.heading_path) if c_data.heading_path else None
-                chunk_row = Chunk(
-                    id=uuid.uuid4(),
-                    tenant_id=tenant_id,
-                    document_id=doc_id,
-                    chunk_index=c_data.chunk_index,
-                    kind=c_data.kind,
-                    page_start=c_data.page_start,
-                    page_end=c_data.page_end,
-                    heading_path=h_path,
-                    text=c_data.text,
-                    content_hash=c_data.content_hash,
-                    token_count=c_data.token_count,
-                    bboxes=c_data.bboxes,
-                    embedding=emb,
-                    embedding_model=settings.embedding_model,
-                )
-                session.add(chunk_row)
+                # Limpiar chunks previos si era reprocesamiento
+                del_stmt = text("DELETE FROM chunks WHERE document_id = :doc_id")
+                session.execute(del_stmt, {"doc_id": str(doc_id)})
 
-            # Actualizar documento
-            doc_row = session.get(Document, doc_id)
-            if doc_row:
-                doc_row.status = "ready"
-                doc_row.stage = None
-                doc_row.chunk_count = len(chunks_data)
-                doc_row.page_count = parsed_doc.page_count
-                doc_row.ocr_used = parsed_doc.ocr_used
-                doc_row.error_code = None
-                doc_row.error_detail = None
+                # Insertar los nuevos chunks
+                for c_data, emb in zip(chunks_data, embeddings, strict=True):
+                    h_path = " › ".join(c_data.heading_path) if c_data.heading_path else None
+                    chunk_row = Chunk(
+                        id=uuid.uuid4(),
+                        tenant_id=tenant_id,
+                        document_id=doc_id,
+                        chunk_index=c_data.chunk_index,
+                        kind=c_data.kind,
+                        page_start=c_data.page_start,
+                        page_end=c_data.page_end,
+                        heading_path=h_path,
+                        text=c_data.text,
+                        content_hash=c_data.content_hash,
+                        token_count=c_data.token_count,
+                        bboxes=c_data.bboxes,
+                        embedding=emb,
+                        embedding_model=settings.embedding_model,
+                    )
+                    session.add(chunk_row)
 
-            # Actualizar job
-            job_row = session.get(IngestionJob, job_id)
-            if job_row:
-                job_row.status = "succeeded"
-                job_row.finished_at = datetime.now(UTC).replace(tzinfo=None)
-                job_row.error_code = None
-                job_row.error_detail = None
+                # Actualizar documento
+                doc_row = session.get(Document, doc_id)
+                if doc_row:
+                    doc_row.status = "ready"
+                    doc_row.stage = None
+                    doc_row.chunk_count = len(chunks_data)
+                    doc_row.page_count = parsed_doc.page_count
+                    doc_row.ocr_used = parsed_doc.ocr_used
+                    doc_row.error_code = None
+                    doc_row.error_detail = None
 
-            session.commit()
-            logger.info(
-                "Ingesta exitosa para documento %s (chunks: %d)",
-                doc_id,
-                len(chunks_data),
-            )
+                # Actualizar job
+                job_row = session.get(IngestionJob, job_id)
+                if job_row:
+                    job_row.status = "succeeded"
+                    job_row.finished_at = datetime.now(UTC).replace(tzinfo=None)
+                    job_row.error_code = None
+                    job_row.error_detail = None
+
+                session.commit()
+
+        ingest_task_duration_seconds.record(
+            time.perf_counter() - t0, {"stage": "persist", "outcome": "success"}
+        )
+        logger.info(
+            "Ingesta exitosa para documento %s (chunks: %d)",
+            doc_id,
+            len(chunks_data),
+        )
 
     except PermanentIngestError as exc:
+        ingest_task_failures_total.add(1, {"error_code": exc.code})
         logger.error("Error permanente durante la ingesta de %s: %s", doc_id, exc)
         with sync_session_maker() as session:
             set_sync_tenant_context(session, tenant_id)
